@@ -139,6 +139,7 @@
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 15% 5%, rgba(79, 127, 36, .10), transparent 26%),
     linear-gradient(180deg, #fbfcf8 0%, var(--bg) 38%, #eef3e8 100%);
@@ -391,6 +392,26 @@ h1, h2, .page-title, .machine-title, .pub-step-hdr h2, .profile-sidebar-card h2 
   transform: translateY(-1px);
 }
 
+.filter-modal {
+  width: min(720px, calc(100vw - 28px));
+}
+
+.filter-modal .catalog-filters-panel {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+.filter-modal .filters {
+  margin-bottom: 0;
+}
+
+.filter-modal .form-actions {
+  margin-top: 18px;
+}
 .catalog-filters-panel {
   display: grid;
   gap: 12px;
@@ -1366,8 +1387,262 @@ label input:focus, label select:focus, label textarea:focus {
 }
 
 @media (max-width: 600px) {
-  .pub-cat-grid { grid-template-columns: repeat(2, 1fr); }
+  h1 { font-size: 26px; }
+  h2 { font-size: 20px; }
+
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: auto;
+    padding: 8px 10px;
+    overflow: hidden;
+  }
+
+  .brand {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .brand-copy strong { font-size: 16px; }
+  .brand-copy small { font-size: 10px; }
+  .brand-mark { width: 28px; height: 28px; }
+
+  .main-nav {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 4px;
+    gap: 4px;
+    scrollbar-width: none;
+  }
+  .main-nav::-webkit-scrollbar { display: none; }
+
+  .nav-btn {
+    flex: 0 0 44px;
+    justify-content: center;
+    min-height: 38px;
+    padding: 0 10px;
+  }
+
+  .user-chip {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+  .user-chip #user-chip-name { display: none; }
+
+  .app-shell {
+    width: min(100% - 20px, 1240px);
+    padding: 12px 0 36px;
+  }
+
+  .page-head,
+  .page-head.compact {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .catalog-toolbar {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 8px;
+  }
+
+  .catalog-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .machine-card {
+    min-height: auto;
+    border-radius: var(--r-md);
+  }
+
+  .machine-media {
+    height: 98px;
+    font-size: 36px;
+  }
+
+  .machine-body { padding: 12px; }
+  .machine-title { font-size: 17px; }
+
+  .machine-top {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .card-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .card-footer .btn,
+  .form-actions .btn,
+  .reservation-actions .btn,
+  .offer-actions .btn,
+  .offer-solicitud-actions .btn {
+    width: 100%;
+  }
+
+  .btn {
+    min-height: 44px;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal {
+    width: 100%;
+    max-height: min(92vh, 760px);
+    padding: 16px;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .modal-head {
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .filter-modal { width: 100%; }
+  .filter-modal .form-actions,
+  .form-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .filter-group { gap: 9px; }
+  .filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .filters::-webkit-scrollbar { display: none; }
+  .filter-chip { flex: 0 0 auto; }
+
+  .pub-cat-grid,
+  .catalog-grid { grid-template-columns: 1fr; }
   .offers-tabs  { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
-  .offers-tab   { white-space: nowrap; }
-  .reservation-grid { grid-template-columns: 1fr; }
+  .offers-tab   { flex: 0 0 auto; white-space: nowrap; }
+
+  .publish-preview,
+  .publish-form,
+  .profile-sidebar-card,
+  .profile-form,
+  .auth-card,
+  .reservation-card {
+    padding: 14px;
+  }
+
+  .publish-preview {
+    display: none;
+  }
+
+  .pub-progress-hdr {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .pub-step-hdr h2 { font-size: 19px; }
+
+  .form-grid,
+  .reservation-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reservation-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .reservation-head-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .reservation-title-wrap {
+    align-items: flex-start;
+  }
+
+  .reservation-machine-icon {
+    width: 38px;
+    height: 38px;
+    font-size: 18px;
+  }
+
+  .reservation-detail {
+    min-height: auto;
+    padding: 11px;
+  }
+
+  .status-track {
+    margin-left: -4px;
+    margin-right: -4px;
+    grid-template-columns: repeat(6, minmax(92px, 1fr));
+  }
+
+  .status-track-step {
+    min-width: 92px;
+  }
+
+  .reservation-equipment {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .reservation-actions,
+  .offer-actions,
+  .offer-solicitud-actions {
+    flex-direction: column;
+  }
+
+  .toast {
+    right: 10px;
+    bottom: 10px;
+    max-width: calc(100vw - 20px);
+  }
+}
+
+@media (max-width: 420px) {
+  .app-shell {
+    width: min(100% - 14px, 1240px);
+  }
+
+  .topbar-right {
+    min-width: 0;
+  }
+
+  .catalog-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-copy small {
+    display: none;
+  }
+
+  .filter-icon-btn {
+    width: 100%;
+  }
+
+  .machine-meta span,
+  .offer-meta span {
+    align-items: flex-start;
+  }
+
+  .price strong {
+    font-size: 18px;
+  }
+
+  .pub-cat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-tabs {
+    grid-template-columns: 1fr;
+  }
 }

@@ -60,54 +60,12 @@
           <i class="fa-solid fa-magnifying-glass"></i>
           <input id="catalog-search" type="search" placeholder="Buscar equipo, marca o zona...">
         </div>
-        <button class="filter-icon-btn" type="button" id="filter-toggle" aria-label="Filtros">
+        <button class="filter-icon-btn" type="button" id="filter-toggle" aria-label="Filtros" onclick="window.openCatalogFilters?.()">
           <i class="fa-solid fa-sliders"></i>
         </button>
       </div>
 
-      <div class="catalog-filters-panel" id="catalog-filters-panel">
-        <div class="filter-group">
-          <label>
-            <span>Disponibilidad</span>
-            <select id="availability-filter">
-              <option value="Todas">Todas</option>
-              <option value="Disponible">Disponible</option>
-              <option value="Esta semana">Esta semana</option>
-              <option value="Proxima semana">Proxima semana</option>
-              <option value="Cosecha">Cosecha</option>
-            </select>
-          </label>
-          <label>
-            <span>Servicio</span>
-            <select id="service-filter">
-              <option value="Todos">Todos</option>
-              <option value="Labores generales">Labores generales</option>
-              <option value="Siembra">Siembra</option>
-              <option value="Cosecha">Cosecha</option>
-              <option value="Pulverizacion / Fumigacion">Pulverizacion / Fumigacion</option>
-              <option value="Distribucion">Distribucion</option>
-              <option value="Embolsado">Embolsado</option>
-              <option value="Apoyo a cosecha">Apoyo a cosecha</option>
-            </select>
-          </label>
-          <label>
-            <span>Reputacion</span>
-            <select id="reputation-filter">
-              <option value="Todas">Todas</option>
-              <option value="4.5">4.5+ estrellas</option>
-              <option value="4.7">4.7+ estrellas</option>
-              <option value="4.8">4.8+ estrellas</option>
-            </select>
-          </label>
-        </div>
-        <div>
-          <div class="filter-label">Maquina</div>
-          <div class="filters" id="category-filters" aria-label="Maquina"></div>
-        </div>
-        <div class="filter-actions-row">
-          <button class="btn ghost" type="button" id="catalog-filters-clear"><i class="fa-solid fa-rotate-left"></i> Limpiar filtros</button>
-        </div>
-      </div>
+
       <p class="results-meta" id="results-meta">0 resultados</p>
       <div class="catalog-grid" id="catalog-grid"></div>
       <div class="empty-state" id="catalog-empty" hidden>
@@ -381,6 +339,65 @@
 
   </main>
 
+
+  <!-- MODAL FILTROS CATALOGO -->
+  <div class="modal-backdrop" id="catalog-filters-modal" hidden>
+    <div class="modal filter-modal">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Matching</p>
+          <h2>Filtrar maquinaria</h2>
+        </div>
+        <button class="icon-btn" type="button" id="filters-close" aria-label="Cerrar filtros">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="catalog-filters-panel" id="catalog-filters-panel">
+        <div class="filter-group">
+          <label>
+            <span>Disponibilidad</span>
+            <select id="availability-filter">
+              <option value="Todas">Todas</option>
+              <option value="Disponible">Disponible</option>
+              <option value="Esta semana">Esta semana</option>
+              <option value="Proxima semana">Proxima semana</option>
+              <option value="Cosecha">Cosecha</option>
+            </select>
+          </label>
+          <label>
+            <span>Servicio</span>
+            <select id="service-filter">
+              <option value="Todos">Todos</option>
+              <option value="Labores generales">Labores generales</option>
+              <option value="Siembra">Siembra</option>
+              <option value="Cosecha">Cosecha</option>
+              <option value="Pulverizacion / Fumigacion">Pulverizacion / Fumigacion</option>
+              <option value="Distribucion">Distribucion</option>
+              <option value="Embolsado">Embolsado</option>
+              <option value="Apoyo a cosecha">Apoyo a cosecha</option>
+            </select>
+          </label>
+          <label>
+            <span>Reputacion</span>
+            <select id="reputation-filter">
+              <option value="Todas">Todas</option>
+              <option value="4.5">4.5+ estrellas</option>
+              <option value="4.7">4.7+ estrellas</option>
+              <option value="4.8">4.8+ estrellas</option>
+            </select>
+          </label>
+        </div>
+        <div>
+          <div class="filter-label">Maquina</div>
+          <div class="filters" id="category-filters" aria-label="Maquina"></div>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn ghost" type="button" id="catalog-filters-clear"><i class="fa-solid fa-rotate-left"></i> Limpiar filtros</button>
+        <button class="btn primary" type="button" id="catalog-filters-apply"><span class="btn-label"><i class="fa-solid fa-check"></i> Actualizar filtros</span></button>
+      </div>
+    </div>
+  </div>
   <!-- MODAL SOLICITAR RESERVA -->
   <div class="modal-backdrop" id="request-modal" hidden>
     <form class="modal" id="request-form" novalidate>

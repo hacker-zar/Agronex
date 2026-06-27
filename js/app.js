@@ -133,6 +133,7 @@ const state = {
   category:     "Todas",
   search:       "",
   filters:      { availability: "Todas", service: "Todos", reputation: "Todas" },
+  filterDraft:  null,
   machines:     readJSON(STORAGE_KEYS.machines, seedMachines),
   reservations: readJSON(STORAGE_KEYS.reservations, []),
   auth:         readObject(STORAGE_KEYS.auth, null),
@@ -176,34 +177,57 @@ function bindNavigation() {
     renderCatalog();
   });
 
-  $("#filter-toggle").addEventListener("click", toggleCatalogFilters);
+  $("#filter-toggle").addEventListener("click", openCatalogFilters);
+  $("#filters-close").addEventListener("click", closeCatalogFilters);
+  $("#catalog-filters-modal").addEventListener("click", (e) => {
+    if (e.target.id === "catalog-filters-modal") closeCatalogFilters();
+  });
 
   $("#availability-filter").addEventListener("change", (e) => {
-    state.filters.availability = e.target.value;
-    renderCatalog();
+    ensureFilterDraft();
+    state.filterDraft.filters.availability = e.target.value;
   });
   $("#service-filter").addEventListener("change", (e) => {
-    state.filters.service = e.target.value;
-    renderCatalog();
+    ensureFilterDraft();
+    state.filterDraft.filters.service = e.target.value;
   });
   $("#reputation-filter").addEventListener("change", (e) => {
-    state.filters.reputation = e.target.value;
-    renderCatalog();
+    ensureFilterDraft();
+    state.filterDraft.filters.reputation = e.target.value;
   });
-  $("#catalog-filters-clear").addEventListener("click", clearCatalogFilters);
+  $("#catalog-filters-clear").addEventListener("click", resetCatalogFilterDraft);
+  $("#catalog-filters-apply").addEventListener("click", applyCatalogFilters);
   $("#catalog-empty-clear").addEventListener("click", () => {
     clearCatalogFilters();
   });
-
   $("#user-chip").addEventListener("click", () => showScreen(state.auth ? "perfil" : "acceso"));
 }
 
-function toggleCatalogFilters() {
-  const panel = $("#catalog-filters-panel");
-  if (!panel) return;
-  panel.hidden = !panel.hidden;
+function openCatalogFilters() {
+  state.filterDraft = currentCatalogFilterState();
+  syncCatalogFilterControls(state.filterDraft.filters);
+  renderCategoryFilters();
+  $("#catalog-filters-modal").hidden = false;
 }
-window.toggleCatalogFilters = toggleCatalogFilters;
+
+function closeCatalogFilters() {
+  $("#catalog-filters-modal").hidden = true;
+  state.filterDraft = null;
+  renderCategoryFilters();
+}
+
+function ensureFilterDraft() {
+  if (!state.filterDraft) state.filterDraft = currentCatalogFilterState();
+}
+
+function currentCatalogFilterState() {
+  return {
+    category: state.category,
+    filters: { ...state.filters },
+  };
+}
+window.openCatalogFilters = openCatalogFilters;
+window.closeCatalogFilters = closeCatalogFilters;
 
 function showScreen(screen) {
   if (screen === "perfil" && !state.auth) screen = "acceso";
@@ -549,8 +573,9 @@ function renderProfile() {
 function renderCategoryFilters() {
   const existing = new Set(state.machines.map((m) => m.category));
   const categories = categoryOrder.filter((c) => c === "Todas" || existing.has(c));
+  const activeCategory = state.filterDraft?.category || state.category;
   $("#category-filters").innerHTML = categories.map((cat) => `
-    <button class="filter-chip ${state.category === cat ? "active" : ""}" type="button" data-category="${escapeHTML(cat)}">
+    <button class="filter-chip ${activeCategory === cat ? "active" : ""}" type="button" data-category="${escapeHTML(cat)}">
       <i class="fa-solid ${cat === "Todas" ? "fa-shapes" : (categoryIcons[cat] || "fa-tractor")}"></i>
       ${escapeHTML(cat === "Todas" ? "Todos" : pluralCategory(cat))}
     </button>
@@ -591,17 +616,36 @@ function renderCatalog() {
 function clearCatalogFilters() {
   state.category = "Todas";
   state.search = "";
-  state.filters = { availability: "Todas", service: "Todos", reputation: "Todas" };
+  state.filters = defaultCatalogFilters();
+  state.filterDraft = null;
   $("#catalog-search").value = "";
-  syncCatalogFilterControls();
+  syncCatalogFilterControls(state.filters);
   renderCategoryFilters();
   renderCatalog();
 }
 
-function syncCatalogFilterControls() {
-  if ($("#availability-filter")) $("#availability-filter").value = state.filters.availability;
-  if ($("#service-filter")) $("#service-filter").value = state.filters.service;
-  if ($("#reputation-filter")) $("#reputation-filter").value = state.filters.reputation;
+function resetCatalogFilterDraft() {
+  state.filterDraft = { category: "Todas", filters: defaultCatalogFilters() };
+  syncCatalogFilterControls(state.filterDraft.filters);
+  renderCategoryFilters();
+}
+
+function applyCatalogFilters() {
+  ensureFilterDraft();
+  state.category = state.filterDraft.category;
+  state.filters = { ...state.filterDraft.filters };
+  closeCatalogFilters();
+  renderCatalog();
+}
+
+function defaultCatalogFilters() {
+  return { availability: "Todas", service: "Todos", reputation: "Todas" };
+}
+
+function syncCatalogFilterControls(filters = state.filters) {
+  if ($("#availability-filter")) $("#availability-filter").value = filters.availability;
+  if ($("#service-filter")) $("#service-filter").value = filters.service;
+  if ($("#reputation-filter")) $("#reputation-filter").value = filters.reputation;
 }
 
 function hasActiveCatalogFilters() {
