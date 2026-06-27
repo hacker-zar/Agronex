@@ -132,6 +132,7 @@ const state = {
   offersTab:    "activas",
   category:     "Todas",
   search:       "",
+  filters:      { availability: "Todas", service: "Todos", reputation: "Todas" },
   machines:     readJSON(STORAGE_KEYS.machines, seedMachines),
   reservations: readJSON(STORAGE_KEYS.reservations, []),
   auth:         readObject(STORAGE_KEYS.auth, null),
@@ -175,20 +176,34 @@ function bindNavigation() {
     renderCatalog();
   });
 
-  $("#filter-toggle").addEventListener("click", () => {
-    showToast("Filtros: elegí una categoría o buscá por texto.");
-  });
+  $("#filter-toggle").addEventListener("click", toggleCatalogFilters);
 
-  $("#catalog-empty-clear").addEventListener("click", () => {
-    state.category = "Todas";
-    state.search = "";
-    $("#catalog-search").value = "";
-    renderCategoryFilters();
+  $("#availability-filter").addEventListener("change", (e) => {
+    state.filters.availability = e.target.value;
     renderCatalog();
+  });
+  $("#service-filter").addEventListener("change", (e) => {
+    state.filters.service = e.target.value;
+    renderCatalog();
+  });
+  $("#reputation-filter").addEventListener("change", (e) => {
+    state.filters.reputation = e.target.value;
+    renderCatalog();
+  });
+  $("#catalog-filters-clear").addEventListener("click", clearCatalogFilters);
+  $("#catalog-empty-clear").addEventListener("click", () => {
+    clearCatalogFilters();
   });
 
   $("#user-chip").addEventListener("click", () => showScreen(state.auth ? "perfil" : "acceso"));
 }
+
+function toggleCatalogFilters() {
+  const panel = $("#catalog-filters-panel");
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+}
+window.toggleCatalogFilters = toggleCatalogFilters;
 
 function showScreen(screen) {
   if (screen === "perfil" && !state.auth) screen = "acceso";
@@ -504,6 +519,7 @@ function hideAuthError() {
 /* ─── RENDER ─── */
 function render() {
   renderCategoryFilters();
+  syncCatalogFilterControls();
   renderCatalog();
   renderReservations();
   renderMisOfertas();
@@ -553,21 +569,71 @@ function renderCatalog() {
   const grid = $("#catalog-grid");
   const items = state.machines.filter((m) => {
     const matchesCat = state.category === "Todas" || m.category === state.category;
-    const text = `${m.title} ${m.category} ${m.location} ${m.owner}`.toLowerCase();
-    return matchesCat && (!state.search || text.includes(state.search));
+    const text = `${m.title} ${m.category} ${m.location} ${m.owner} ${m.availability}`.toLowerCase();
+    return matchesCat
+      && (!state.search || text.includes(state.search))
+      && matchesAvailabilityFilter(m)
+      && matchesServiceFilter(m)
+      && matchesReputationFilter(m);
   });
 
   $("#catalog-empty").hidden = items.length > 0;
-  $("#catalog-empty-text").textContent = state.search || state.category !== "Todas"
-    ? "No hay maquinaria para esta búsqueda. Probá con otra categoría o término."
-    : "Todavía no hay maquinaria publicada.";
+  $("#catalog-empty-text").textContent = hasActiveCatalogFilters()
+    ? "No hay maquinaria para esta busqueda. Proba limpiando filtros."
+    : "Todavia no hay maquinaria publicada.";
   $("#results-meta").textContent = `${items.length} resultado${items.length === 1 ? "" : "s"}`;
   grid.innerHTML = items.map(machineCard).join("");
 
   $$(".request-btn").forEach((btn) => btn.addEventListener("click", () => openRequestModal(btn.dataset.machineId)));
-  $$(".report-btn").forEach((btn) => btn.addEventListener("click", () => showToast("Denuncia recibida para revisión.")));
+  $$(".report-btn").forEach((btn) => btn.addEventListener("click", () => showToast("Denuncia recibida para revision.")));
 }
 
+function clearCatalogFilters() {
+  state.category = "Todas";
+  state.search = "";
+  state.filters = { availability: "Todas", service: "Todos", reputation: "Todas" };
+  $("#catalog-search").value = "";
+  syncCatalogFilterControls();
+  renderCategoryFilters();
+  renderCatalog();
+}
+
+function syncCatalogFilterControls() {
+  if ($("#availability-filter")) $("#availability-filter").value = state.filters.availability;
+  if ($("#service-filter")) $("#service-filter").value = state.filters.service;
+  if ($("#reputation-filter")) $("#reputation-filter").value = state.filters.reputation;
+}
+
+function hasActiveCatalogFilters() {
+  return Boolean(state.search)
+    || state.category !== "Todas"
+    || state.filters.availability !== "Todas"
+    || state.filters.service !== "Todos"
+    || state.filters.reputation !== "Todas";
+}
+
+function matchesAvailabilityFilter(machine) {
+  const filter = state.filters.availability;
+  if (filter === "Todas") return true;
+  const value = textKey(machine.availability);
+  if (filter === "Disponible") return value.includes("disponible");
+  if (filter === "Esta semana") return value.includes("esta semana");
+  if (filter === "Proxima semana") return value.includes("proxima semana");
+  if (filter === "Cosecha") return value.includes("cosecha");
+  return true;
+}
+
+function matchesServiceFilter(machine) {
+  const filter = state.filters.service;
+  if (filter === "Todos") return true;
+  return defaultJobByCategory[machine.category] === filter;
+}
+
+function matchesReputationFilter(machine) {
+  const filter = state.filters.reputation;
+  if (filter === "Todas") return true;
+  return typeof machine.rating === "number" && machine.rating >= Number(filter);
+}
 function machineCard(machine) {
   const hasRating   = typeof machine.rating === "number";
   const hasDistance = typeof machine.distanceKm === "number";
@@ -1151,6 +1217,8 @@ function readObject(key, fallback) {
 
 /* ─── UTILS ─── */
 function clean(value) { return String(value || "").trim(); }
+
+function textKey(value) { return clean(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
 
 function hashCode(value) {
   return Array.from(String(value || "")).reduce((hash, char) => ((hash << 5) - hash) + char.charCodeAt(0), 0);
