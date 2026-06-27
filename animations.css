@@ -1,0 +1,854 @@
+/* ═══════════════════════════════════════════════════════════════════
+   AGRONEX — animations.css
+   Animaciones adicionales. Agregar en index.html DESPUÉS de styles.css:
+   <link rel="stylesheet" href="animations.css">
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─────────────────────────────────────────
+   1. KEYFRAMES NUEVOS
+───────────────────────────────────────── */
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInDown {
+  from { opacity: 0; transform: translateY(-18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.88); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes scaleInBounce {
+  0%   { opacity: 0; transform: scale(0.7); }
+  70%  { transform: scale(1.06); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+@keyframes countUp {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes floatUpDown {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+
+@keyframes ripple {
+  0%   { transform: scale(0); opacity: 0.5; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+
+@keyframes borderDance {
+  0%   { border-color: var(--accent); }
+  50%  { border-color: var(--green-200); }
+  100% { border-color: var(--accent); }
+}
+
+@keyframes toastSlideIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+@keyframes toastSlideOut {
+  from { opacity: 1; transform: translateY(0)    scale(1); }
+  to   { opacity: 0; transform: translateY(8px)  scale(0.95); }
+}
+
+@keyframes progressFill {
+  from { width: 0; }
+}
+
+@keyframes iconBounce {
+  0%, 100% { transform: scale(1); }
+  30%       { transform: scale(1.22); }
+  60%       { transform: scale(0.9); }
+}
+
+@keyframes spinSlow {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes breathe {
+  0%, 100% { box-shadow: none; }
+  50%       { box-shadow: var(--shadow-sm); }
+}
+
+@keyframes typewriter {
+  from { width: 0; }
+  to   { width: 100%; }
+}
+
+@keyframes particleFly {
+  0%   { opacity: 1; transform: translate(0,0) scale(1); }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0); }
+}
+
+/* ─────────────────────────────────────────
+   2. CLASES DE UTILIDAD
+───────────────────────────────────────── */
+
+.anim-slide-left   { animation: slideInLeft  .4s cubic-bezier(.4,0,.2,1) both; }
+.anim-slide-right  { animation: slideInRight .4s cubic-bezier(.4,0,.2,1) both; }
+.anim-slide-down   { animation: slideInDown  .35s cubic-bezier(.4,0,.2,1) both; }
+.anim-scale-in     { animation: scaleIn      .35s cubic-bezier(.4,0,.2,1) both; }
+.anim-bounce-in    { animation: scaleInBounce .5s cubic-bezier(.4,0,.2,1) both; }
+.anim-float        { animation: floatUpDown 3.5s ease-in-out infinite; }
+
+/* Delays escalonados para listas/grids */
+.anim-d1  { animation-delay: .04s  !important; }
+.anim-d2  { animation-delay: .1s   !important; }
+.anim-d3  { animation-delay: .16s  !important; }
+.anim-d4  { animation-delay: .22s  !important; }
+.anim-d5  { animation-delay: .28s  !important; }
+.anim-d6  { animation-delay: .34s  !important; }
+.anim-d7  { animation-delay: .4s   !important; }
+.anim-d8  { animation-delay: .46s  !important; }
+
+
+/* ─────────────────────────────────────────
+   3. TOPBAR — entrada suave al cargar
+───────────────────────────────────────── */
+
+.topbar {
+  animation: slideInDown .45s cubic-bezier(.4,0,.2,1) both;
+  transition: box-shadow .3s;
+}
+
+.topbar-logo {
+  transition: transform .2s, opacity .2s;
+}
+.topbar-logo:hover {
+  transform: scale(1.04);
+  opacity: .85;
+}
+
+/* Icono del logo en topbar flota suavemente */
+.logomark {
+  animation: floatUpDown 4s ease-in-out infinite;
+}
+
+/* Nav items con underline animado más fluido */
+.tcn-item {
+  position: relative;
+  overflow: hidden;
+  transition: color .2s, background .2s, transform .15s;
+}
+.tcn-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  opacity: 0;
+  border-radius: inherit;
+  transform: scale(0.6);
+  transition: opacity .2s, transform .2s;
+  pointer-events: none;
+}
+.tcn-item:hover::before {
+  opacity: .06;
+  transform: scale(1);
+}
+.tcn-item:active { transform: scale(.95); }
+
+/* Badge del nav con aparición en bounce */
+.tcn-badge, .bn-dot {
+  animation: scaleInBounce .4s cubic-bezier(.4,0,.2,1) both;
+}
+
+
+/* ─────────────────────────────────────────
+   4. CARDS — hover con profundidad real
+───────────────────────────────────────── */
+
+.card,
+.metric-card,
+.market-card,
+.nd-card,
+.service-card,
+.res-live-card,
+.res-card,
+.of-pub-card,
+.sales-card {
+  transition: transform .22s cubic-bezier(.4,0,.2,1),
+              box-shadow .22s cubic-bezier(.4,0,.2,1),
+              border-color .22s;
+  will-change: transform;
+}
+
+.card:hover,
+.metric-card:hover,
+.market-card:hover,
+.nd-card:hover,
+.service-card:hover,
+.res-live-card:hover,
+.res-card:hover,
+.of-pub-card:hover,
+.sales-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.card:active,
+.market-card:active,
+.nd-card:active,
+.service-card:active {
+  transform: translateY(0) scale(.987);
+}
+
+/* Metric cards: número sube con countUp al aparecer */
+.metric-val {
+  animation: countUp .5s cubic-bezier(.4,0,.2,1) both;
+}
+
+
+/* ─────────────────────────────────────────
+   5. BOTONES — ripple + micro-interacciones
+───────────────────────────────────────── */
+
+.btn, button.btn, .reserve-btn, .wa-btn,
+.nd-card-cta-main, .btn-primary, .btn-secondary,
+.btn-ghost, .auth-social-btn {
+  position: relative;
+  overflow: hidden;
+  transition: transform .15s, box-shadow .15s, background .15s, border-color .15s;
+}
+
+/* Ripple al hacer click */
+.btn::after,
+button.btn::after,
+.btn-primary::after,
+.reserve-btn::after,
+.nd-card-cta-main::after,
+.wa-btn::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 100%; padding-top: 100%;
+  margin-left: -50%; margin-top: -50%;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.25);
+  transform: scale(0);
+  opacity: 0;
+  pointer-events: none;
+}
+.btn:active::after,
+button.btn:active::after,
+.btn-primary:active::after,
+.reserve-btn:active::after,
+.nd-card-cta-main:active::after,
+.wa-btn:active::after {
+  animation: ripple .5s ease-out;
+}
+
+.btn-primary:hover,
+.wa-send-btn:hover,
+.reserve-btn:hover,
+.nd-card-cta-main:hover {
+  transform: translateY(-2px);
+}
+.btn-primary:active,
+.reserve-btn:active,
+.nd-card-cta-main:active {
+  transform: scale(.96) translateY(0);
+}
+
+/* FAB de calculadora */
+.calc-fab {
+  transition: transform .2s cubic-bezier(.4,0,.2,1), box-shadow .2s;
+  animation: floatUpDown 3.8s ease-in-out infinite;
+}
+.calc-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+.calc-fab:active {
+  transform: scale(.95);
+  animation: none;
+}
+
+
+/* ─────────────────────────────────────────
+   6. FORMULARIOS — focus con glow animado
+───────────────────────────────────────── */
+
+.form-input,
+.form-select,
+.verif-input {
+  transition: border-color .18s, box-shadow .18s, background .18s, transform .15s;
+}
+.form-input:focus,
+.verif-input:focus {
+  transform: scale(1.012);
+}
+
+/* Label flota arriba al hacer focus (si el label está sobre el input) */
+.form-group:focus-within .form-label {
+  color: var(--accent);
+  transition: color .2s;
+}
+
+
+/* ─────────────────────────────────────────
+   7. AUTH SCREEN — partículas de fondo
+───────────────────────────────────────── */
+
+/* Partículas flotantes decorativas en el fondo del auth */
+#auth-screen::before,
+#auth-screen::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+#auth-screen::before {
+  width: 320px; height: 320px;
+  background: transparent;
+  top: -80px; left: -80px;
+  animation: floatUpDown 6s ease-in-out infinite;
+}
+#auth-screen::after {
+  width: 260px; height: 260px;
+  background: transparent;
+  bottom: -60px; right: -60px;
+  animation: floatUpDown 5s ease-in-out infinite reverse;
+}
+
+/* Card de auth entra con más drama */
+.auth-card {
+  animation: scaleInBounce .6s cubic-bezier(.4,0,.2,1) both;
+}
+
+/* Tabs del auth con slide suave */
+.auth-tab {
+  transition: background .2s, color .2s, transform .15s, box-shadow .2s;
+}
+.auth-tab.active {
+  animation: scaleIn .2s cubic-bezier(.4,0,.2,1) both;
+}
+.auth-tab:hover:not(.active) {
+  transform: scale(1.03);
+}
+
+
+/* ─────────────────────────────────────────
+   8. NAVEGACIÓN INFERIOR (mobile)
+───────────────────────────────────────── */
+
+.bottom-nav {
+  animation: slideInDown .4s .1s cubic-bezier(.4,0,.2,1) both;
+}
+
+.bn-item {
+  transition: color .2s, transform .2s;
+  position: relative;
+}
+.bn-item:active {
+  transform: scale(.88);
+}
+.bn-item.active i {
+  animation: iconBounce .4s cubic-bezier(.4,0,.2,1) both;
+}
+
+/* Indicador activo con breathe */
+.bn-item.active::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 50%; transform: translateX(-50%);
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--accent-light);
+  z-index: -1;
+  animation: breathe 2.5s ease-in-out infinite;
+}
+
+
+/* ─────────────────────────────────────────
+   9. TOAST NOTIFICATIONS — entrada/salida
+───────────────────────────────────────── */
+
+.toast-container .toast,
+.toast-container > div {
+  animation: toastSlideIn .35s cubic-bezier(.4,0,.2,1) both;
+}
+.toast-container .toast.removing,
+.toast-container > div.removing {
+  animation: toastSlideOut .3s cubic-bezier(.4,0,.2,1) forwards;
+}
+
+
+/* ─────────────────────────────────────────
+   10. MODALES — apertura con escala
+───────────────────────────────────────── */
+
+.modal-card,
+.mkt-sheet {
+  transition: transform .3s cubic-bezier(.4,0,.2,1);
+}
+.modal-overlay.open .modal-card {
+  animation: scaleIn .3s cubic-bezier(.4,0,.2,1) both;
+}
+
+/* Bottom sheets — slide from bottom */
+.mkt-sheet {
+  transition: transform .35s cubic-bezier(.4,0,.2,1);
+}
+
+
+/* ─────────────────────────────────────────
+   11. SKELETON LOADING — shimmer mejorado
+───────────────────────────────────────── */
+
+.skeleton,
+[class*="skeleton-"] {
+  background: var(--bg-secondary);
+  background-size: 800px 100%;
+  animation: none;
+  border-radius: var(--r-sm);
+}
+
+
+/* ─────────────────────────────────────────
+   12. CHIPS & FILTROS — selección animada
+───────────────────────────────────────── */
+
+.chip, .filter-chip, .res-filter-chip,
+.nd-cat, .urgency-btn, .pub-mode-btn,
+.pub-service-btn, .drone-trabajo-chip,
+.pub-avail-chip {
+  transition: background .18s, color .18s, border-color .18s,
+              transform .15s, box-shadow .15s;
+}
+.chip:hover, .filter-chip:hover, .nd-cat:hover,
+.urgency-btn:hover, .pub-mode-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.chip:active, .filter-chip:active, .nd-cat:active,
+.urgency-btn:active {
+  transform: scale(.93);
+}
+.chip.active, .filter-chip.active,
+.urgency-btn.active, .pub-mode-btn.active,
+.pub-service-btn.active {
+  animation: borderDance 2.5s ease-in-out infinite;
+}
+
+
+/* ─────────────────────────────────────────
+   13. ICONOS — bounce al activar sección
+───────────────────────────────────────── */
+
+/* Cuando se navega a una sección, el icono del nav rebota */
+.tcn-item.active i,
+.bn-item.active i {
+  animation: iconBounce .45s cubic-bezier(.4,0,.2,1) both;
+}
+
+/* Icono del FAB de calculadora rota levemente en hover */
+.calc-fab:hover .fab-icon {
+  animation: spinSlow 1s linear infinite;
+}
+
+
+/* ─────────────────────────────────────────
+   14. SEMÁFORO / RESULT CARDS — entrada impactante
+───────────────────────────────────────── */
+
+/* Cards de resultado de la calculadora */
+#calc-result-section .metric-card,
+#calc-result-section .card,
+.calc-result-card {
+  animation: fadeUp .5s cubic-bezier(.4,0,.2,1) both;
+}
+#calc-result-section .metric-card:nth-child(1),
+#calc-result-section .card:nth-child(1) { animation-delay: .05s; }
+#calc-result-section .metric-card:nth-child(2),
+#calc-result-section .card:nth-child(2) { animation-delay: .12s; }
+#calc-result-section .metric-card:nth-child(3),
+#calc-result-section .card:nth-child(3) { animation-delay: .19s; }
+#calc-result-section .metric-card:nth-child(4),
+#calc-result-section .card:nth-child(4) { animation-delay: .26s; }
+#calc-result-section .metric-card:nth-child(5),
+#calc-result-section .card:nth-child(5) { animation-delay: .33s; }
+
+/* Semáforo (si existe) */
+.semaforo-dot, .traffic-dot {
+  animation: breathe 2s ease-in-out infinite;
+}
+
+
+/* ─────────────────────────────────────────
+   15. PROGRESS / WIZARD — línea animada
+───────────────────────────────────────── */
+
+.verif-step-line.done {
+  background: var(--accent);
+  animation: progressFill .5s cubic-bezier(.4,0,.2,1) both;
+}
+
+.verif-step-dot.active {
+  animation: breathe 2s ease-in-out infinite;
+}
+
+.verif-step-dot.done {
+  animation: iconBounce .4s cubic-bezier(.4,0,.2,1) both;
+}
+
+
+/* ─────────────────────────────────────────
+   16. FAVORITOS — corazón con bounce
+───────────────────────────────────────── */
+
+.fav-btn, .nd-card-cta-fav, [class*="fav-btn"] {
+  transition: transform .2s, color .2s;
+}
+.fav-btn:hover, .nd-card-cta-fav:hover {
+  transform: scale(1.2);
+}
+.fav-btn.active i,
+.nd-card-cta-fav.active i,
+.fav-btn:active i {
+  animation: iconBounce .35s cubic-bezier(.4,0,.2,1) both;
+}
+
+
+/* ─────────────────────────────────────────
+   17. DROPDOWN DE CAMPAÑA — entrada suave
+───────────────────────────────────────── */
+
+.campaign-dropdown {
+  transform-origin: top center;
+  transition: opacity .2s, transform .2s;
+}
+/* Se aplica cuando el dropdown está visible */
+.campaign-dropdown.open,
+.campaign-dropdown:not([style*="display: none"]):not([style*="display:none"]) {
+  animation: scaleIn .22s cubic-bezier(.4,0,.2,1) both;
+}
+
+.camp-dd-item {
+  transition: background .15s, transform .15s;
+}
+.camp-dd-item:hover {
+  background: var(--bg-secondary);
+  transform: translateX(3px);
+}
+.camp-dd-item:active { transform: scale(.97); }
+
+
+/* ─────────────────────────────────────────
+   18. MARKET / NEXUDRIVE — staggered reveal
+───────────────────────────────────────── */
+
+/* Las tarjetas del mercado aparecen escalonadas */
+.market-grid .market-card,
+.nd-grid .nd-card,
+.sales-grid .sales-card,
+.service-grid .service-card {
+  animation: fadeUp .45s cubic-bezier(.4,0,.2,1) both;
+}
+.market-grid .market-card:nth-child(1),
+.nd-grid .nd-card:nth-child(1) { animation-delay: .04s; }
+.market-grid .market-card:nth-child(2),
+.nd-grid .nd-card:nth-child(2) { animation-delay: .1s; }
+.market-grid .market-card:nth-child(3),
+.nd-grid .nd-card:nth-child(3) { animation-delay: .16s; }
+.market-grid .market-card:nth-child(4),
+.nd-grid .nd-card:nth-child(4) { animation-delay: .22s; }
+.market-grid .market-card:nth-child(5),
+.nd-grid .nd-card:nth-child(5) { animation-delay: .28s; }
+.market-grid .market-card:nth-child(6),
+.nd-grid .nd-card:nth-child(6) { animation-delay: .34s; }
+.market-grid .market-card:nth-child(n+7),
+.nd-grid .nd-card:nth-child(n+7) { animation-delay: .4s; }
+
+/* Imagen de la tarjeta con zoom suave en hover */
+.market-card-img, .nd-card-img, .sales-gallery-item {
+  overflow: hidden;
+}
+.market-card-img img, .nd-card-img img, .sales-gallery-item img {
+  transition: transform .4s cubic-bezier(.4,0,.2,1);
+  will-change: transform;
+}
+.market-card:hover .market-card-img img,
+.nd-card:hover .nd-card-img img,
+.sales-card:hover .sales-gallery-item img {
+  transform: scale(1.06);
+}
+
+
+/* ─────────────────────────────────────────
+   19. BADGE DE VERIFICACIÓN — brillo
+───────────────────────────────────────── */
+
+.trust-badge.verified {
+  position: relative;
+  overflow: hidden;
+}
+.trust-badge.verified::before {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 100%; height: 100%;
+  background: transparent;
+  animation: none;
+}
+
+
+/* ─────────────────────────────────────────
+   20. MÁS SHEET — grid de opciones
+───────────────────────────────────────── */
+
+.mas-nav-card {
+  transition: background .18s, transform .18s, box-shadow .18s, border-color .18s;
+}
+.mas-nav-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+  border-color: var(--accent);
+}
+.mas-nav-card:active {
+  transform: scale(.93);
+}
+.mas-nav-card i {
+  transition: transform .2s;
+}
+.mas-nav-card:hover i {
+  transform: scale(1.2) rotate(-5deg);
+}
+
+/* Cards en el sheet aparecen escalonados */
+#mas-sheet .mas-nav-card {
+  animation: scaleIn .35s cubic-bezier(.4,0,.2,1) both;
+}
+#mas-sheet .mas-nav-card:nth-child(1) { animation-delay: .04s; }
+#mas-sheet .mas-nav-card:nth-child(2) { animation-delay: .09s; }
+#mas-sheet .mas-nav-card:nth-child(3) { animation-delay: .14s; }
+#mas-sheet .mas-nav-card:nth-child(4) { animation-delay: .19s; }
+#mas-sheet .mas-nav-card:nth-child(5) { animation-delay: .24s; }
+#mas-sheet .mas-nav-card:nth-child(6) { animation-delay: .29s; }
+#mas-sheet .mas-nav-card:nth-child(7) { animation-delay: .34s; }
+
+
+/* ─────────────────────────────────────────
+   21. DARK MODE — transición global
+───────────────────────────────────────── */
+
+/* Cuando se activa dark mode, el body transiciona todo suavemente */
+body, body * {
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: .3s;
+  transition-timing-function: ease;
+}
+/* Excepciones — elementos que no deben heredar la transición global */
+body *:where(
+  [class*="anim-"],
+  .calc-fab,
+  .logomark,
+  .auth-logomark,
+  .bn-item.active::before,
+  .trust-badge.verified::before
+) {
+  transition: unset;
+}
+
+
+/* ─────────────────────────────────────────
+   22. REDUCE MOTION — accesibilidad
+───────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+
+/* ─────────────────────────────────────────
+   23. NEXUDRIVE — transición Alquiler ↔ Compra
+───────────────────────────────────────── */
+
+/* Indicador deslizante dentro del tab container */
+.nd-mode-tabs {
+  position: relative;
+  overflow: hidden;
+}
+
+/* El tab activo tiene una sombra de color más dramática */
+.nd-mode-tab {
+  transition: background .28s cubic-bezier(.4,0,.2,1),
+              color .28s cubic-bezier(.4,0,.2,1),
+              box-shadow .28s cubic-bezier(.4,0,.2,1),
+              transform .18s cubic-bezier(.4,0,.2,1);
+  position: relative;
+  z-index: 1;
+}
+.nd-mode-tab:active {
+  transform: scale(.93);
+}
+.nd-mode-tab i {
+  transition: transform .3s cubic-bezier(.34,1.56,.64,1);
+}
+.nd-mode-tab.active i {
+  transform: scale(1.22) rotate(-8deg);
+  animation: iconBounce .45s cubic-bezier(.4,0,.2,1) both;
+}
+.nd-mode-tab:not(.active):hover i {
+  transform: scale(1.1);
+}
+
+/* Salida del contenido — slide hacia la dirección correcta */
+@keyframes ndExitLeft {
+  from { opacity: 1; transform: translateX(0)     scale(1); }
+  to   { opacity: 0; transform: translateX(-28px) scale(.97); }
+}
+@keyframes ndExitRight {
+  from { opacity: 1; transform: translateX(0)    scale(1); }
+  to   { opacity: 0; transform: translateX(28px) scale(.97); }
+}
+
+/* Entrada del contenido nuevo */
+@keyframes ndEnterFromRight {
+  from { opacity: 0; transform: translateX(28px) scale(.97); }
+  to   { opacity: 1; transform: translateX(0)    scale(1); }
+}
+@keyframes ndEnterFromLeft {
+  from { opacity: 0; transform: translateX(-28px) scale(.97); }
+  to   { opacity: 1; transform: translateX(0)     scale(1); }
+}
+
+/* Clases que aplica la función switchNexuMode */
+.nd-exit-left  { animation: ndExitLeft  .28s cubic-bezier(.4,0,.2,1) forwards; }
+.nd-exit-right { animation: ndExitRight .28s cubic-bezier(.4,0,.2,1) forwards; }
+.nd-enter-right { animation: ndEnterFromRight .38s cubic-bezier(.34,1.04,.64,1) both; }
+.nd-enter-left  { animation: ndEnterFromLeft  .38s cubic-bezier(.34,1.04,.64,1) both; }
+
+/* Cards dentro del panel nuevo aparecen escalonadas */
+.nd-enter-right .market-card,
+.nd-enter-right .nd-card,
+.nd-enter-right .sales-card,
+.nd-enter-left  .market-card,
+.nd-enter-left  .nd-card,
+.nd-enter-left  .sales-card {
+  animation: fadeUp .42s cubic-bezier(.4,0,.2,1) both;
+}
+.nd-enter-right .market-card:nth-child(1),
+.nd-enter-left  .market-card:nth-child(1),
+.nd-enter-right .nd-card:nth-child(1),
+.nd-enter-left  .nd-card:nth-child(1)  { animation-delay: .06s; }
+.nd-enter-right .market-card:nth-child(2),
+.nd-enter-left  .market-card:nth-child(2),
+.nd-enter-right .nd-card:nth-child(2),
+.nd-enter-left  .nd-card:nth-child(2)  { animation-delay: .12s; }
+.nd-enter-right .market-card:nth-child(3),
+.nd-enter-left  .market-card:nth-child(3),
+.nd-enter-right .nd-card:nth-child(3),
+.nd-enter-left  .nd-card:nth-child(3)  { animation-delay: .18s; }
+.nd-enter-right .market-card:nth-child(n+4),
+.nd-enter-left  .market-card:nth-child(n+4),
+.nd-enter-right .nd-card:nth-child(n+4),
+.nd-enter-left  .nd-card:nth-child(n+4) { animation-delay: .24s; }
+
+/* Flash sutil de color en el tab container al cambiar */
+@keyframes ndTabFlash {
+  0%   { box-shadow: var(--shadow-sm); }
+  40%  { box-shadow: var(--shadow-md); }
+  100% { box-shadow: var(--shadow-sm); }
+}
+.nd-mode-tabs.switching {
+  animation: ndTabFlash .5s ease both;
+}
+
+/* ─────────────────────────────────────────
+   24. NEXUDRIVE — pill deslizante Alquiler ↔ Compra
+───────────────────────────────────────── */
+
+.nd-mode-tabs {
+  position: relative;
+}
+
+.nd-tab-pill {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  box-shadow: var(--shadow-sm);
+  transition:
+    left  .32s cubic-bezier(.4,0,.2,1),
+    width .32s cubic-bezier(.4,0,.2,1),
+    box-shadow .2s;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.nd-mode-tab {
+  position: relative;
+  z-index: 1;
+  transition:
+    color     .22s cubic-bezier(.4,0,.2,1),
+    transform .16s cubic-bezier(.4,0,.2,1);
+}
+
+.nd-mode-tab.active {
+  background: transparent !important;
+  color: #fff !important;
+  box-shadow: none !important;
+  font-weight: 800;
+}
+
+.nd-mode-tab:active {
+  transform: scale(.91);
+}
+
+@keyframes tabIconPop {
+  0%   { transform: scale(1)    rotate(0deg); }
+  40%  { transform: scale(1.28) rotate(-10deg); }
+  70%  { transform: scale(.92)  rotate(4deg); }
+  100% { transform: scale(1)    rotate(0deg); }
+}
+.nd-mode-tab.active i {
+  display: inline-block;
+  animation: tabIconPop .42s cubic-bezier(.4,0,.2,1) both;
+}
+
+@keyframes pillArrive {
+  0%   { box-shadow: var(--shadow-sm); }
+  45%  { box-shadow: var(--shadow-md); }
+  100% { box-shadow: var(--shadow-sm); }
+}
+.nd-tab-pill.arriving {
+  animation: pillArrive .45s ease both;
+}
+
+[data-theme="dark"] .nd-tab-pill {
+  box-shadow: var(--shadow-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nd-tab-pill { transition: none; }
+  .nd-mode-tab.active i { animation: none; }
+  .nd-tab-pill.arriving { animation: none; }
+}
