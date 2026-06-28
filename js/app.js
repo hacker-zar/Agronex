@@ -3,6 +3,9 @@
 const STORAGE_KEYS = {
   machines: "nexudrive_mvp_machines",
   reservations: "nexudrive_mvp_reservations",
+  reschedules: "nexudrive_mvp_reschedules",
+  delays: "nexudrive_mvp_delays",
+  availabilitySlots: "nexudrive_mvp_availability_slots",
   auth: "nexudrive_mvp_auth",
   theme: "nexudrive_mvp_theme",
 };
@@ -131,6 +134,12 @@ const offerStatusLabels = {
   inactive: "Dada de baja",
 };
 
+const availabilitySlotStatusLabels = {
+  available: "Libre",
+  partially_booked: "Parcialmente ocupada",
+  unavailable: "No disponible",
+};
+
 const state = {
   screen:       "catalogo",
   offersTab:    "activas",
@@ -140,6 +149,9 @@ const state = {
   filterDraft:  null,
   machines:     readJSON(STORAGE_KEYS.machines, seedMachines),
   reservations: readJSON(STORAGE_KEYS.reservations, []),
+  rescheduleRequests: readJSON(STORAGE_KEYS.reschedules, []),
+  delayRecords: readJSON(STORAGE_KEYS.delays, []),
+  availabilitySlots: readJSON(STORAGE_KEYS.availabilitySlots, []),
   auth:         readObject(STORAGE_KEYS.auth, null),
   theme:        normalizeTheme(localStorage.getItem(STORAGE_KEYS.theme)),
   profile:      readObject("nexudrive_mvp_profile", {
@@ -170,6 +182,8 @@ function init() {
   bindAuth();
   bindConfirmModal();
   bindReportModal();
+  bindRescheduleModal();
+  bindDelayModal();
   bindLocationPicker();
   bindOffersTabs();
   render();
@@ -264,13 +278,23 @@ function bindForms() {
     setButtonLoading(submitBtn, true, "Publicando...");
 
     setTimeout(() => {
+      const machineId = `m-${Date.now()}`;
+      const availabilityWindow = availabilityWindowFromPublishForm(formEl);
+      const availabilitySlot = {
+        id: `slot-${Date.now()}`,
+        machineId,
+        startDate: availabilityWindow.startDate,
+        endDate: availabilityWindow.endDate,
+        estimatedHours: availabilityWindow.estimatedHours,
+        status: "available",
+      };
       const machine = {
-        id: `m-${Date.now()}`,
+        id: machineId,
         title:        clean(form.get("title")),
         category:     clean(form.get("category")),
         price:        Number(form.get("price")),
         location:     clean(form.get("location")),
-        availability: clean(form.get("availability")),
+        availability: availabilityLabelForSlot(availabilitySlot),
         plate:        normalizePlate(form.get("plate")),
         owner:        clean(form.get("owner")),
         description:  clean(form.get("description")) || "Maquinaria publicada para solicitar reserva.",
@@ -278,7 +302,9 @@ function bindForms() {
         offerStatus:  "active",
       };
       state.machines.unshift(machine);
+      state.availabilitySlots.unshift(availabilitySlot);
       saveMachines();
+      saveAvailabilitySlots();
       formEl.reset();
       resetPublishWizard();
       setButtonLoading(submitBtn, false);
@@ -384,9 +410,21 @@ function validatePublishStep() {
     return false;
   }
   if (state.publishStep === 2) {
-    const fields = ["title", "price", "location", "availability"];
+    const fields = ["title", "price", "location", "availabilityStart", "availabilityEnd"];
     const invalid = fields.find((n) => !form.elements[n].checkValidity());
     if (invalid) { form.elements[invalid].reportValidity(); return false; }
+    const start = clean(form.elements.availabilityStart.value);
+    const end = clean(form.elements.availabilityEnd.value);
+    if (start && end && start > end) {
+      showToast("La ventana de disponibilidad debe terminar despues de iniciar.");
+      form.elements.availabilityEnd.focus();
+      return false;
+    }
+    const estimatedHours = Number(form.elements.estimatedHours.value || 0);
+    if (form.elements.estimatedHours.value && estimatedHours <= 0) {
+      form.elements.estimatedHours.reportValidity();
+      return false;
+    }
   }
   return true;
 }
@@ -402,7 +440,12 @@ function updatePublishPreview() {
   $("#publish-preview-title").textContent = clean(form.elements.title.value) || "Tu equipo publicado";
   $("#publish-preview-description").textContent = clean(form.elements.description.value) || "Completá los datos para ver cómo aparecerá en el catálogo.";
   $("#publish-preview-location").textContent = clean(form.elements.location.value) || "Zona de trabajo";
-  $("#publish-preview-availability").textContent = clean(form.elements.availability.value) || "Disponibilidad";
+  const availabilityWindow = availabilityWindowFromPublishForm(form);
+  const availabilityLabel = availabilityWindow.startDate && availabilityWindow.endDate
+    ? availabilityLabelForSlot(availabilityWindow)
+    : "Ventana de disponibilidad";
+  if (form.elements.availability) form.elements.availability.value = availabilityLabel;
+  $("#publish-preview-availability").textContent = availabilityLabel;
   $("#publish-preview-owner").textContent = clean(form.elements.owner.value) || "Contratista";
   $("#publish-preview-price").textContent = form.elements.price.value ? `USD ${money(form.elements.price.value)}` : "USD -";
   const plate = normalizePlate(formControl(form, "plate")?.value);
@@ -716,7 +759,13 @@ function hasActiveCatalogFilters() {
 function matchesAvailabilityFilter(machine) {
   const filter = state.filters.availability;
   if (filter === "Todas") return true;
-  const value = textKey(machine.availability);
+  const slot = availabilitySlotForMachine(machine);
+  if (slot) {
+    if (filter === "Disponible") return slot.status !== "unavailable";
+    if (filter === "Esta semana") return slotOverlapsDateWindow(slot, 0, 7);
+    if (filter === "Proxima semana") return slotOverlapsDateWindow(slot, 7, 14);
+  }
+  const value = textKey(machineAvailabilityLabel(machine));
   if (filter === "Disponible") return value.includes("disponible");
   if (filter === "Esta semana") return value.includes("esta semana");
   if (filter === "Proxima semana") return value.includes("proxima semana");
@@ -736,12 +785,16 @@ function matchesReputationFilter(machine) {
   return typeof machine.rating === "number" && machine.rating >= Number(filter);
 }
 function isAvailableToday(machine) {
+  const slot = availabilitySlotForMachine(machine);
+  if (slot) return slotContainsDate(slot, offsetISODate(0));
   return machine.availableToday === true || textKey(machine.availability) === "disponible";
 }
 
 function isAvailableTomorrow(machine) {
-  const value = textKey(machine.availability);
-  return machine.availableTomorrow === true || value.includes("manana") || value.includes("ma\u00f1ana");
+  const slot = availabilitySlotForMachine(machine);
+  if (slot) return slotContainsDate(slot, offsetISODate(1));
+  const value = textKey(machineAvailabilityLabel(machine));
+  return machine.availableTomorrow === true || value.includes("manana") || value.includes("ma\\u00f1ana");
 }
 function matchesTodayFilter(machine) {
   return !state.filters.todayOnly || isAvailableToday(machine);
@@ -751,6 +804,10 @@ function machineCard(machine) {
   const hasDistance = typeof machine.distanceKm === "number";
   const availableToday = isAvailableToday(machine);
   const availableTomorrow = !availableToday && isAvailableTomorrow(machine);
+  const slot = availabilitySlotForMachine(machine);
+  const availabilityLabel = machineAvailabilityLabel(machine);
+  const availabilityStatus = slot ? availabilitySlotStatusLabel(slot.status) : "Ventana flexible";
+  const slotUnavailable = slot?.status === "unavailable";
   const availabilityClass = availableToday ? "available-today" : (availableTomorrow ? "available-tomorrow" : "");
   const availabilityBadge = availableToday
     ? `<span class="availability-badge available-today-badge"><span class="availability-dot available-today-dot" aria-hidden="true"></span> Disponible hoy</span>`
@@ -774,7 +831,8 @@ function machineCard(machine) {
         </div>
         <div class="machine-meta">
           <span><i class="fa-solid fa-location-dot"></i>${escapeHTML(machine.location)}${hasDistance ? ` · ${machine.distanceKm} km` : ""}</span>
-          <span><i class="fa-regular fa-calendar-check"></i>${escapeHTML(machine.availability)}</span>
+          <span><i class="fa-regular fa-calendar-check"></i>${escapeHTML(availabilityLabel)}</span>
+          <span><i class="fa-solid fa-layer-group"></i>${escapeHTML(availabilityStatus)}</span>
           <span><i class="fa-solid fa-user-tie"></i>${escapeHTML(machine.owner)}</span>
           ${hasRating ? `<span><i class="fa-solid fa-star"></i>${machine.rating.toFixed(1)}${machine.reviews ? ` (${machine.reviews})` : ""}</span>` : ""}
         </div>
@@ -784,8 +842,8 @@ function machineCard(machine) {
             <strong>USD ${money(machine.price)}</strong>
             <span>por hectárea</span>
           </div>
-          <button class="btn primary request-btn" type="button" data-machine-id="${escapeHTML(machine.id)}">
-            Solicitar
+          <button class="btn primary request-btn" type="button" data-machine-id="${escapeHTML(machine.id)}" ${slotUnavailable ? "disabled" : ""}>
+            ${slotUnavailable ? "No disponible" : "Solicitar"}
           </button>
         </div>
       </div>
@@ -887,6 +945,7 @@ function renderMisOfertas() {
       "Dar de baja"
     )
   ));
+  $$(".slot-status-btn").forEach((btn) => btn.addEventListener("click", () => setAvailabilitySlotStatus(btn.dataset.machineId, btn.dataset.status)));
   $$(".offer-delete-btn").forEach((btn) => btn.addEventListener("click", () =>
     confirmAction(
       "Eliminar definitivamente",
@@ -894,7 +953,9 @@ function renderMisOfertas() {
       "Esta acción no se puede deshacer.",
       () => {
         state.machines = state.machines.filter((m) => m.id !== btn.dataset.id);
+        state.availabilitySlots = state.availabilitySlots.filter((slot) => slot.machineId !== btn.dataset.id);
         saveMachines();
+        saveAvailabilitySlots();
         renderMisOfertas();
         showToast("Oferta eliminada.");
       },
@@ -909,6 +970,10 @@ function offerCard(machine, tab) {
   const icon = categoryIcons[machine.category] || "fa-tractor";
   const statusClass = machine.offerStatus === "active" ? "status-active" : machine.offerStatus === "paused" ? "status-paused" : "status-inactive";
   const statusLabel = offerStatusLabels[machine.offerStatus] || machine.offerStatus;
+  const slot = availabilitySlotForMachine(machine);
+  const slotStatus = slot ? availabilitySlotStatusLabel(slot.status) : "Sin ventana flexible";
+  const slotStatusClass = slot ? availabilitySlotStatusClass(slot.status) : "status-paused";
+  const slotControls = tab !== "bajas" ? availabilitySlotControls(machine, slot) : "";
 
   const actions = tab === "activas" ? `
     ${solicitudesPendientes > 0 ? `<button class="btn btn-sm warning" disabled><i class="fa-solid fa-inbox"></i> ${solicitudesPendientes} pendiente${solicitudesPendientes > 1 ? "s" : ""}</button>` : ""}
@@ -935,9 +1000,11 @@ function offerCard(machine, tab) {
         <div class="offer-meta">
           <span><i class="fa-solid fa-location-dot"></i>${escapeHTML(machine.location)}</span>
           <span><i class="fa-solid fa-dollar-sign"></i>USD ${money(machine.price)}/ha</span>
-          <span><i class="fa-regular fa-calendar-check"></i>${escapeHTML(machine.availability)}</span>
+          <span><i class="fa-regular fa-calendar-check"></i>${escapeHTML(machineAvailabilityLabel(machine))}</span>
+          <span><i class="fa-solid fa-layer-group"></i><strong class="status-pill ${slotStatusClass}">${escapeHTML(slotStatus)}</strong></span>
           ${reservasTotales > 0 ? `<span><i class="fa-solid fa-inbox"></i>${reservasTotales} reserva${reservasTotales > 1 ? "s" : ""}</span>` : ""}
         </div>
+        <div class="availability-window-actions">${slotControls}</div>
         <div class="offer-actions">${actions}</div>
       </div>
     </div>
@@ -1002,6 +1069,37 @@ function setOfferStatus(machineId, status) {
   renderCategoryFilters();
 }
 
+function availabilitySlotControls(machine, slot) {
+  if (!slot) return "";
+  const statuses = [
+    { status: "available", icon: "fa-circle-check", label: "Libre" },
+    { status: "partially_booked", icon: "fa-circle-half-stroke", label: "Parcial" },
+    { status: "unavailable", icon: "fa-lock", label: "Cerrar ventana" },
+  ];
+  return statuses.map((item) => `
+    <button class="btn btn-sm ghost slot-status-btn ${slot.status === item.status ? "active" : ""}" type="button"
+      data-machine-id="${escapeHTML(machine.id)}" data-status="${item.status}">
+      <i class="fa-solid ${item.icon}"></i> ${item.label}
+    </button>
+  `).join("");
+}
+
+function setAvailabilitySlotStatus(machineId, status) {
+  const slot = findAvailabilitySlot(machineId);
+  if (!slot || !availabilitySlotStatusLabels[status]) return;
+  slot.status = status;
+  saveAvailabilitySlots();
+  renderMisOfertas();
+  renderCatalog();
+  showToast(`Ventana marcada como ${availabilitySlotStatusLabel(status).toLowerCase()}.`);
+}
+
+function markAvailabilitySlotPartiallyBooked(machineId) {
+  const slot = findAvailabilitySlot(machineId);
+  if (!slot || slot.status === "unavailable") return;
+  slot.status = "partially_booked";
+  saveAvailabilitySlots();
+}
 /* ─── RESERVAS ─── */
 function renderReservations() {
   const list  = $("#reservations-list");
@@ -1030,6 +1128,10 @@ function renderReservations() {
       () => deleteReservation(btn.dataset.reservationId),
       "Eliminar"
     )));
+  $$(".open-reschedule-btn").forEach((btn) => btn.addEventListener("click", () => openRescheduleModal(btn.dataset.reservationId)));
+  $$(".accept-reschedule-btn").forEach((btn) => btn.addEventListener("click", () => acceptRescheduleRequest(btn.dataset.rescheduleId)));
+  $$(".reject-reschedule-btn").forEach((btn) => btn.addEventListener("click", () => rejectRescheduleRequest(btn.dataset.rescheduleId)));
+  $$(".open-delay-btn").forEach((btn) => btn.addEventListener("click", () => openDelayModal(btn.dataset.reservationId)));
 }
 
 function reservationCard(reservation) {
@@ -1037,6 +1139,8 @@ function reservationCard(reservation) {
   const canStartWork  = reservation.status === "accepted";
   const canFinishWork = reservation.status === "working";
   const canDeleteFinished = reservation.status === "done" || reservation.status === "rejected";
+  const canRequestReschedule = ["accepted", "working"].includes(reservation.status) && !pendingRescheduleFor(reservation.id);
+  const canReportDelay = ["accepted", "working"].includes(reservation.status);
   const machine = findMachine(reservation.machineId);
   const icon = categoryIcons[reservation.category] || categoryIcons[machine?.category] || "fa-tractor";
   const requestCode = reservationCode(reservation);
@@ -1063,6 +1167,8 @@ function reservationCard(reservation) {
         ${reservationMetrics(reservation)}
       </div>
       ${reservationStatusTrack(reservation)}
+      ${rescheduleSection(reservation)}
+      ${delaySection(reservation)}
       <div class="reservation-equipment">
         <i class="fa-solid fa-truck-pickup"></i>
         <div>
@@ -1080,6 +1186,20 @@ function reservationCard(reservation) {
           </button>
           <button class="btn primary accept-reservation" type="button" data-reservation-id="${reservation.id}">
             <i class="fa-solid fa-check"></i> Aceptar
+          </button>
+        </div>
+      ` : ""}
+      ${canReportDelay ? `
+        <div class="reservation-actions">
+          <button class="btn ghost open-delay-btn" type="button" data-reservation-id="${reservation.id}">
+            <i class="fa-regular fa-clock"></i> Reportar retraso
+          </button>
+        </div>
+      ` : ""}
+      ${canRequestReschedule ? `
+        <div class="reservation-actions">
+          <button class="btn ghost open-reschedule-btn" type="button" data-reservation-id="${reservation.id}">
+            <i class="fa-regular fa-calendar-plus"></i> Solicitar reprogramacion
           </button>
         </div>
       ` : ""}
@@ -1110,6 +1230,116 @@ function reservationCard(reservation) {
   `;
 }
 
+function delaySection(reservation) {
+  const delays = delayHistoryFor(reservation.id);
+  if (delays.length === 0) return "";
+  return `
+    <section class="delay-panel" aria-label="Retrasos registrados">
+      <div class="reschedule-panel-head">
+        <div>
+          <h4>Retrasos registrados</h4>
+          <p>Registro de realidad operativa. No cambia fechas ni estado del trabajo.</p>
+        </div>
+        <span class="status-pill status-delay">${delays.length}</span>
+      </div>
+      <div class="reschedule-list">
+        ${delays.map(delayHistoryItem).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function delayHistoryFor(jobId) {
+  return state.delayRecords
+    .filter((record) => record.jobId === jobId)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+
+function delayHistoryItem(record) {
+  return `
+    <div class="reschedule-item">
+      <strong>${delayTypeLabel(record.delayType)} � ${money(record.minutesDelayed)} min</strong>
+      <small>Reportado por ${escapeHTML(record.reportedByName || record.reportedBy)} � ${formatDate(record.createdAt)}</small>
+      ${record.reason ? `<small>Motivo: ${escapeHTML(record.reason)}</small>` : ""}
+    </div>
+  `;
+}
+
+function delayTypeLabel(type) {
+  const labels = { start: "Inicio", execution: "Ejecucion", end: "Final" };
+  return labels[type] || type;
+}
+function rescheduleSection(reservation) {
+  const pending = pendingRescheduleFor(reservation.id);
+  const history = rescheduleHistoryFor(reservation.id);
+  if (!pending && history.length === 0) return "";
+  return `
+    <section class="reschedule-panel" aria-label="Reprogramacion">
+      <div class="reschedule-panel-head">
+        <div>
+          <h4>Reprogramacion</h4>
+          <p>Nadie cambia una fecha solo. La otra parte debe aceptar la propuesta.</p>
+        </div>
+        ${pending ? '<span class="status-pill status-reschedule-pending">Pendiente</span>' : ""}
+      </div>
+      ${pending ? reschedulePendingMarkup(pending) : ""}
+      ${history.length ? `
+        <div class="reschedule-list">
+          ${history.map(rescheduleHistoryItem).join("")}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function reschedulePendingMarkup(request) {
+  return `
+    <div class="reschedule-item">
+      <strong>${formatDateRangeValues(request.proposedStart, request.proposedEnd)}</strong>
+      <small>Pedido por ${escapeHTML(request.requestedByName || request.requestedBy)}. Fecha actual: ${formatDateRangeValues(request.oldStart, request.oldEnd)}.</small>
+      ${request.reason ? `<small>Motivo: ${escapeHTML(request.reason)}</small>` : ""}
+      <div class="reschedule-actions">
+        <button class="btn btn-sm ghost reject-reschedule-btn" type="button" data-reschedule-id="${request.id}">
+          <i class="fa-solid fa-xmark"></i> Rechazar
+        </button>
+        <button class="btn btn-sm primary accept-reschedule-btn" type="button" data-reschedule-id="${request.id}">
+          <i class="fa-solid fa-check"></i> Aceptar
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function rescheduleHistoryItem(request) {
+  return `
+    <div class="reschedule-item">
+      <strong>${formatDateRangeValues(request.proposedStart, request.proposedEnd)}</strong>
+      <small>${rescheduleStatusLabel(request.status)} � pedido por ${escapeHTML(request.requestedByName || request.requestedBy)}</small>
+      ${request.reason ? `<small>Motivo: ${escapeHTML(request.reason)}</small>` : ""}
+    </div>
+  `;
+}
+
+function pendingRescheduleFor(jobId) {
+  return state.rescheduleRequests.find((request) => request.jobId === jobId && request.status === "pending");
+}
+
+function rescheduleHistoryFor(jobId) {
+  return state.rescheduleRequests
+    .filter((request) => request.jobId === jobId && request.status !== "pending")
+    .sort((a, b) => String(b.resolvedAt || b.createdAt).localeCompare(String(a.resolvedAt || a.createdAt)));
+}
+
+function rescheduleStatusLabel(status) {
+  const labels = { accepted: "Aceptada", rejected: "Rechazada", pending: "Pendiente" };
+  return labels[status] || status;
+}
+
+function formatDateRangeValues(start, end) {
+  const formattedStart = formatDate(start);
+  if (!end || end === start) return formattedStart;
+  return `${formattedStart} al ${formatDate(end)}`;
+}
 function reservationStatusTrack(reservation) {
   const status = typeof reservation === "string" ? reservation : reservation.status;
   if (status === "rejected") return `<p class="reservation-rejected"><i class="fa-solid fa-xmark-circle"></i> Solicitud rechazada</p>`;
@@ -1237,6 +1467,197 @@ function timelineStamp(stepKey, reservation) {
   if (!time && stepKey !== "done") return "";
   return `<time>${formatDate(dateByStep[stepKey])}</time>${time ? `<strong>${time}</strong>` : ""}`;
 }
+function bindDelayModal() {
+  const form = $("#delay-form");
+  if (!form) return;
+  form.addEventListener("submit", submitDelayRecord);
+  form.addEventListener("input", hideDelayError);
+  $("#delay-close").addEventListener("click", closeDelayModal);
+  $("#delay-cancel").addEventListener("click", closeDelayModal);
+  $("#delay-modal").addEventListener("click", (e) => {
+    if (e.target.id === "delay-modal") closeDelayModal();
+  });
+}
+
+function openDelayModal(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  const form = $("#delay-form");
+  form.reset();
+  formControl(form, "reservationId").value = reservation.id;
+  hideDelayError();
+  $("#delay-modal").hidden = false;
+  formControl(form, "minutesDelayed").focus();
+}
+
+function closeDelayModal() {
+  $("#delay-modal").hidden = true;
+  hideDelayError();
+}
+
+function submitDelayRecord(e) {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const reservationId = formControl(form, "reservationId").value;
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  const minutesDelayed = Number(formControl(form, "minutesDelayed").value);
+  if (!Number.isFinite(minutesDelayed) || minutesDelayed <= 0) {
+    showDelayError("Ingresa minutos de retraso con un numero mayor a 0.");
+    return;
+  }
+  state.delayRecords.unshift({
+    id: `delay-${Date.now()}`,
+    jobId: reservation.id,
+    reportedBy: currentUserId(),
+    reportedByName: currentUserLabel(),
+    delayType: clean(formControl(form, "delayType").value) || "execution",
+    minutesDelayed,
+    reason: clean(formControl(form, "reason").value),
+    createdAt: new Date().toISOString(),
+  });
+  saveDelayRecords();
+  closeDelayModal();
+  renderReservations();
+  renderMisOfertas();
+  showToast("Retraso registrado. El estado y la fecha del trabajo no cambiaron.");
+}
+
+function showDelayError(message) {
+  const error = $("#delay-error");
+  error.textContent = message;
+  error.hidden = false;
+}
+
+function hideDelayError() {
+  const error = $("#delay-error");
+  if (!error) return;
+  error.textContent = "";
+  error.hidden = true;
+}
+function bindRescheduleModal() {
+  const form = $("#reschedule-form");
+  if (!form) return;
+  form.addEventListener("submit", submitRescheduleRequest);
+  form.addEventListener("input", hideRescheduleError);
+  $("#reschedule-close").addEventListener("click", closeRescheduleModal);
+  $("#reschedule-cancel").addEventListener("click", closeRescheduleModal);
+  $("#reschedule-modal").addEventListener("click", (e) => {
+    if (e.target.id === "reschedule-modal") closeRescheduleModal();
+  });
+}
+
+function openRescheduleModal(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  if (pendingRescheduleFor(reservationId)) {
+    showToast("Ya hay una reprogramacion pendiente para esta reserva.");
+    return;
+  }
+  const form = $("#reschedule-form");
+  form.reset();
+  formControl(form, "reservationId").value = reservation.id;
+  formControl(form, "proposedStart").value = reservation.date || "";
+  formControl(form, "proposedEnd").value = reservation.dateEnd || reservation.date || "";
+  $("#reschedule-current-range").textContent = `Fecha actual: ${formatDateRangeValues(reservation.date, reservation.dateEnd || reservation.date)}`;
+  hideRescheduleError();
+  $("#reschedule-modal").hidden = false;
+  formControl(form, "proposedStart").focus();
+}
+
+function closeRescheduleModal() {
+  $("#reschedule-modal").hidden = true;
+  hideRescheduleError();
+}
+
+function submitRescheduleRequest(e) {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const reservationId = formControl(form, "reservationId").value;
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  if (pendingRescheduleFor(reservation.id)) {
+    showRescheduleError("Ya existe una reprogramacion pendiente para esta reserva.");
+    return;
+  }
+  const proposedStart = formControl(form, "proposedStart").value;
+  const proposedEnd = formControl(form, "proposedEnd").value || proposedStart;
+  if (!proposedStart) {
+    showRescheduleError("Elegi una nueva fecha de inicio.");
+    return;
+  }
+  if (proposedEnd < proposedStart) {
+    showRescheduleError("La fecha fin propuesta no puede ser anterior al inicio.");
+    return;
+  }
+  state.rescheduleRequests.unshift({
+    id: `rs-${Date.now()}`,
+    jobId: reservation.id,
+    requestedBy: currentUserId(),
+    requestedByName: currentUserLabel(),
+    oldStart: reservation.date,
+    oldEnd: reservation.dateEnd || reservation.date,
+    proposedStart,
+    proposedEnd,
+    status: "pending",
+    reason: clean(formControl(form, "reason").value),
+    createdAt: new Date().toISOString(),
+  });
+  saveRescheduleRequests();
+  closeRescheduleModal();
+  renderReservations();
+  showToast("Propuesta de reprogramacion enviada. La fecha no cambia hasta que sea aceptada.");
+}
+
+function acceptRescheduleRequest(id) {
+  const request = state.rescheduleRequests.find((item) => item.id === id && item.status === "pending");
+  if (!request) return;
+  const reservation = state.reservations.find((item) => item.id === request.jobId);
+  if (!reservation) return;
+  request.status = "accepted";
+  request.resolvedAt = new Date().toISOString();
+  reservation.date = request.proposedStart;
+  reservation.dateEnd = request.proposedEnd && request.proposedEnd !== request.proposedStart ? request.proposedEnd : "";
+  if (reservation.status === "pending") reservation.status = "accepted";
+  reservation.rescheduledAt = request.resolvedAt;
+  saveReservations();
+  saveRescheduleRequests();
+  renderReservations();
+  renderMisOfertas();
+  showToast("Reprogramacion aceptada. La fecha del trabajo fue actualizada.");
+}
+
+function rejectRescheduleRequest(id) {
+  const request = state.rescheduleRequests.find((item) => item.id === id && item.status === "pending");
+  if (!request) return;
+  request.status = "rejected";
+  request.resolvedAt = new Date().toISOString();
+  saveRescheduleRequests();
+  renderReservations();
+  renderMisOfertas();
+  showToast("Reprogramacion rechazada. La fecha original se mantiene.");
+}
+
+function showRescheduleError(message) {
+  const error = $("#reschedule-error");
+  error.textContent = message;
+  error.hidden = false;
+}
+
+function hideRescheduleError() {
+  const error = $("#reschedule-error");
+  if (!error) return;
+  error.textContent = "";
+  error.hidden = true;
+}
+
+function currentUserId() {
+  return clean(state.auth?.email) || "local-user";
+}
+
+function currentUserLabel() {
+  return clean(state.profile.name) || clean(state.auth?.name) || "Usuario local";
+}
 function deleteReservation(id) {
   const index = state.reservations.findIndex((r) => r.id === id && (r.status === "done" || r.status === "rejected"));
   if (index === -1) return;
@@ -1252,6 +1673,7 @@ function setReservationStatus(id, status) {
   if (!res) return;
   res.status = status;
   res.resolvedAt = new Date().toISOString();
+  if (status === "accepted") markAvailabilitySlotPartiallyBooked(res.machineId);
   saveReservations();
   renderReservations();
   renderMisOfertas();
@@ -1908,6 +2330,15 @@ function saveMachines() {
 function saveReservations() {
   localStorage.setItem(STORAGE_KEYS.reservations, JSON.stringify(state.reservations));
 }
+function saveRescheduleRequests() {
+  localStorage.setItem(STORAGE_KEYS.reschedules, JSON.stringify(state.rescheduleRequests));
+}
+function saveDelayRecords() {
+  localStorage.setItem(STORAGE_KEYS.delays, JSON.stringify(state.delayRecords));
+}
+function saveAvailabilitySlots() {
+  localStorage.setItem(STORAGE_KEYS.availabilitySlots, JSON.stringify(state.availabilitySlots));
+}
 function saveAuth() {
   if (state.auth) {
     localStorage.setItem(STORAGE_KEYS.auth, JSON.stringify(state.auth));
@@ -1920,6 +2351,69 @@ function saveProfile() {
 }
 function findMachine(id) {
   return state.machines.find((m) => m.id === id);
+}
+function findAvailabilitySlot(machineId) {
+  return state.availabilitySlots.find((slot) => slot.machineId === machineId);
+}
+
+function availabilityWindowFromPublishForm(form) {
+  const startDate = clean(formControl(form, "availabilityStart")?.value);
+  const endDate = clean(formControl(form, "availabilityEnd")?.value);
+  const estimatedRaw = clean(formControl(form, "estimatedHours")?.value);
+  return {
+    startDate,
+    endDate,
+    estimatedHours: estimatedRaw ? Number(estimatedRaw) : null,
+  };
+}
+
+function availabilitySlotForMachine(machine) {
+  return machine ? findAvailabilitySlot(machine.id) : null;
+}
+
+function machineAvailabilityLabel(machine) {
+  const slot = availabilitySlotForMachine(machine);
+  return slot ? availabilityLabelForSlot(slot) : clean(machine?.availability) || "Disponibilidad a coordinar";
+}
+
+function availabilityLabelForSlot(slot) {
+  if (!slot?.startDate || !slot?.endDate) return "Ventana flexible";
+  const range = slot.startDate === slot.endDate
+    ? formatDate(slot.startDate)
+    : `${formatDate(slot.startDate)} al ${formatDate(slot.endDate)}`;
+  const hours = Number(slot.estimatedHours || 0) > 0 ? ` - ${money(slot.estimatedHours)} h estimadas` : "";
+  return `Disponible del ${range}${hours}`;
+}
+
+function availabilitySlotStatusLabel(status) {
+  return availabilitySlotStatusLabels[status] || status || "Ventana flexible";
+}
+
+function availabilitySlotStatusClass(status) {
+  const map = {
+    available: "status-available-window",
+    partially_booked: "status-partial-window",
+    unavailable: "status-unavailable-window",
+  };
+  return map[status] || "status-paused";
+}
+
+function slotContainsDate(slot, isoDate) {
+  if (!slot || slot.status === "unavailable") return false;
+  return clean(slot.startDate) <= isoDate && clean(slot.endDate) >= isoDate;
+}
+
+function slotOverlapsDateWindow(slot, fromOffsetDays, toOffsetDays) {
+  if (!slot || slot.status === "unavailable") return false;
+  const start = offsetISODate(fromOffsetDays);
+  const end = offsetISODate(toOffsetDays);
+  return clean(slot.startDate) <= end && clean(slot.endDate) >= start;
+}
+
+function offsetISODate(days) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 function readJSON(key, fallback) {
   try {

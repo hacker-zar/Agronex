@@ -1082,6 +1082,82 @@ h1, h2, .page-title, .machine-title, .pub-step-hdr h2, .profile-sidebar-card h2 
 .reservation-equipment strong { display: block; color: var(--text); font-size: 12px; }
 .reservation-equipment span { display: block; }
 .reservation-rejected { color: var(--danger); font-size: 13px; margin: 10px 0; }
+
+.reschedule-panel {
+  margin: 14px 0 0;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-soft);
+}
+
+.delay-panel {
+  margin: 14px 0 0;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--info-500);
+  border-radius: var(--r-md);
+  background: var(--surface-soft);
+}
+
+.reschedule-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.reschedule-panel h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.reschedule-panel p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.reschedule-list {
+  display: grid;
+  gap: 8px;
+}
+
+.reschedule-item {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+.reschedule-item strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.reschedule-item small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.reschedule-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.status-reschedule-pending { background: var(--warning-100); color: var(--warning-500); }
+.status-reschedule-accepted { background: var(--accent-soft); color: var(--accent-strong); }
+.status-reschedule-rejected { background: var(--danger-100); color: var(--danger-500); }
+.status-delay { background: var(--info-100); color: var(--info-500); }
 /* Status Pills */
 .status-pill { font-size: 11px; }
 .status-pending  { background: var(--warning-100); color: var(--warning-500); }
@@ -1092,6 +1168,9 @@ h1, h2, .page-title, .machine-title, .pub-step-hdr h2, .profile-sidebar-card h2 
 .status-active   { background: var(--accent-soft); color: var(--accent-strong); }
 .status-paused   { background: var(--warning-100); color: var(--warning-500); }
 .status-inactive { background: var(--neutral-100); color: var(--muted); }
+.status-available-window { background: var(--accent-soft); color: var(--accent-strong); }
+.status-partial-window { background: var(--warning-100); color: var(--warning-500); }
+.status-unavailable-window { background: var(--danger-100); color: var(--danger-500); }
 
 /* ───────────── MIS OFERTAS ───────────── */
 .offers-tabs {
@@ -1188,6 +1267,19 @@ h1, h2, .page-title, .machine-title, .pub-step-hdr h2, .profile-sidebar-card h2 
 .offer-actions {
   display: flex; flex-wrap: wrap; gap: 7px;
   margin-top: 10px;
+}
+
+.availability-window-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.slot-status-btn.active {
+  border-color: rgba(56,118,29,.35);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 
 .offer-solicitud-card {

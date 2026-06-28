@@ -215,9 +215,18 @@
                 <span>Zona</span>
                 <input name="location" required maxlength="60" placeholder="Pergamino, Buenos Aires">
               </label>
+              <input name="availability" type="hidden">
               <label>
-                <span>Disponibilidad</span>
-                <input name="availability" required maxlength="50" placeholder="Disponible esta semana">
+                <span>Disponible desde</span>
+                <input name="availabilityStart" required type="date">
+              </label>
+              <label>
+                <span>Disponible hasta</span>
+                <input name="availabilityEnd" required type="date">
+              </label>
+              <label>
+                <span>Horas estimadas (opcional)</span>
+                <input name="estimatedHours" type="number" min="1" max="240" step="1" inputmode="numeric" placeholder="Ej: 18">
               </label>
               <label id="publish-plate-field">
                 <span>Patente / matricula</span>
@@ -584,6 +593,85 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- MODAL REGISTRAR RETRASO -->
+  <div class="modal-backdrop" id="delay-modal" hidden>
+    <form class="modal modal-confirm" id="delay-form" novalidate>
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Registro operativo</p>
+          <h2>Reportar retraso</h2>
+        </div>
+        <button class="icon-btn" type="button" id="delay-close" aria-label="Cerrar reporte de retraso">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <input type="hidden" name="reservationId">
+      <div class="form-grid">
+        <label>
+          <span>Tipo de retraso</span>
+          <select name="delayType" required>
+            <option value="start">Inicio</option>
+            <option value="execution">Ejecucion</option>
+            <option value="end">Final</option>
+          </select>
+        </label>
+        <label>
+          <span>Minutos</span>
+          <input name="minutesDelayed" type="number" min="1" max="1440" step="1" inputmode="numeric" required placeholder="45">
+        </label>
+      </div>
+      <label class="full-field">
+        <span>Motivo opcional</span>
+        <textarea name="reason" rows="3" maxlength="220" placeholder="Ej.: lluvia, rotura menor, espera de camiones, acceso complicado..."></textarea>
+      </label>
+      <p class="form-error" id="delay-error" role="alert" hidden></p>
+      <div class="form-actions">
+        <button class="btn ghost" type="button" id="delay-cancel">Cancelar</button>
+        <button class="btn primary" type="submit">
+          <i class="fa-solid fa-clock"></i> Registrar retraso
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- MODAL REPROGRAMACION -->
+  <div class="modal-backdrop" id="reschedule-modal" hidden>
+    <form class="modal modal-confirm" id="reschedule-form" novalidate>
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Negociacion</p>
+          <h2>Solicitar reprogramacion</h2>
+        </div>
+        <button class="icon-btn" type="button" id="reschedule-close" aria-label="Cerrar reprogramacion">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <input type="hidden" name="reservationId">
+      <p class="confirm-body" id="reschedule-current-range">Fecha actual</p>
+      <div class="form-grid">
+        <label>
+          <span>Nueva fecha inicio</span>
+          <input name="proposedStart" type="date" required>
+        </label>
+        <label>
+          <span>Nueva fecha fin</span>
+          <input name="proposedEnd" type="date" required>
+        </label>
+      </div>
+      <label class="full-field">
+        <span>Motivo</span>
+        <textarea name="reason" rows="3" maxlength="220" placeholder="Ej.: lluvia, demora de cosecha previa, camino intransitable..."></textarea>
+      </label>
+      <p class="form-error" id="reschedule-error" role="alert" hidden></p>
+      <div class="form-actions">
+        <button class="btn ghost" type="button" id="reschedule-cancel">Cancelar</button>
+        <button class="btn primary" type="submit">
+          <i class="fa-solid fa-paper-plane"></i> Enviar propuesta
+        </button>
+      </div>
+    </form>
   </div>
 
   <!-- MODAL DENUNCIA -->
