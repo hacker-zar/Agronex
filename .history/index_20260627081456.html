@@ -4,15 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NexuDrive MVP</title>
-  <script>
-    document.documentElement.dataset.theme = localStorage.getItem("nexudrive_mvp_theme") || "normal";
-  </script>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,650;9..144,750&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="/styles.css">
   <link rel="icon" href="assets/agronex-logo.png" type="image/png">
 </head>
@@ -294,35 +290,6 @@
             <span>Descripcion corta</span>
             <textarea name="bio" rows="4" maxlength="220" placeholder="Contale al otro lado que haces y en que zona trabajas."></textarea>
           </label>
-          <section class="theme-settings" aria-labelledby="theme-title">
-            <div>
-              <p class="eyebrow">Configuracion visual</p>
-              <h2 id="theme-title">Tema de uso</h2>
-            </div>
-            <div class="theme-options" role="radiogroup" aria-label="Tema de NexuDrive">
-              <label class="theme-option">
-                <input type="radio" name="theme" value="normal">
-                <span>
-                  <strong>Modo Normal</strong>
-                  <small>Uso cotidiano</small>
-                </span>
-              </label>
-              <label class="theme-option">
-                <input type="radio" name="theme" value="dark">
-                <span>
-                  <strong>Modo Oscuro</strong>
-                  <small>Baja luz</small>
-                </span>
-              </label>
-              <label class="theme-option field-theme-option">
-                <input type="radio" name="theme" value="field">
-                <span>
-                  <strong>Modo Campo</strong>
-                  <small>Alto contraste al sol</small>
-                </span>
-              </label>
-            </div>
-          </section>
           <div class="form-actions">
             <button class="btn ghost" type="button" id="logout-btn"><i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar sesion</button>
             <button class="btn primary" type="submit"><span class="btn-label"><i class="fa-solid fa-check"></i> Guardar perfil</span></button>
@@ -429,10 +396,6 @@
           <div class="filter-label">Maquina</div>
           <div class="filters" id="category-filters" aria-label="Maquina"></div>
         </div>
-        <label class="inline-check filter-today-check">
-          <input id="today-filter" type="checkbox">
-          <span>Solo disponibles hoy</span>
-        </label>
       </div>
       <div class="form-actions">
         <button class="btn ghost" type="button" id="catalog-filters-clear"><i class="fa-solid fa-rotate-left"></i> Limpiar filtros</button>
@@ -454,60 +417,33 @@
       </div>
       <input type="hidden" name="machineId">
       <div class="form-grid">
-        <label class="request-date-field">
-          <span id="request-date-label">Inicio estimado</span>
+        <label>
+          <span>Fecha inicio estimada</span>
           <input name="date" type="date" required>
         </label>
-        <label id="request-deadline-field">
-          <span>Fecha limite (opcional)</span>
+        <label>
+          <span>Fecha fin</span>
           <input name="dateEnd" type="date" placeholder="Flexible">
         </label>
-        <label id="request-crop-field" hidden>
-          <span>Cultivo</span>
-          <input name="crop" maxlength="60" placeholder="Ej: Soja, maiz, trigo">
-        </label>
-        <label id="request-grain-field" hidden>
-          <span>Tipo de grano</span>
-          <input name="grainType" maxlength="60" placeholder="Ej: Maiz, soja, trigo">
-        </label>
-        <label class="request-hectares-field">
-          <span>Hectareas a trabajar</span>
+        <label>
+          <span>Hectareas</span>
           <input name="hectares" type="number" min="1" max="10000" step="1" inputmode="numeric" required placeholder="120">
-          <small class="request-estimate" id="request-estimate" hidden></small>
         </label>
-        <label id="request-tons-field" hidden>
-          <span id="request-tons-label">Toneladas aproximadas</span>
-          <input name="estimatedTons" type="number" min="1" max="10000" step="0.5" inputmode="decimal" placeholder="350">
-        </label>
-        <label id="request-urgency-field">
+        <label>
           <span>Urgencia</span>
           <select name="urgency">
-            <option value="flexible">Flexible</option>
-            <option value="esta-semana">Esta semana</option>
-            <option value="manana">Manana</option>
-            <option value="hoy">Hoy mismo</option>
+            <option value="">Sin definir</option>
+            <option value="baja">Baja</option>
+            <option value="media">Media</option>
+            <option value="alta">Alta</option>
           </select>
         </label>
       </div>
-      <div class="form-grid" id="request-transport-fields" hidden>
-        <label>
-          <span>Origen</span>
-          <input name="origin" maxlength="100" placeholder="Campo, acopio o localidad de origen">
-        </label>
-        <label>
-          <span>Destino</span>
-          <input name="destination" maxlength="100" placeholder="Silo, puerto, acopio o localidad">
-        </label>
-        <label>
-          <span>Tipo de carga</span>
-          <input name="cargoType" maxlength="80" placeholder="Ej: Maiz, soja, fertilizante">
-        </label>
-      </div>
-      <label class="inline-check" id="request-flexible-field">
+      <label class="inline-check">
         <input name="dateFlexible" type="checkbox">
-        <span>Fecha limite flexible</span>
+        <span>Fecha fin flexible</span>
       </label>
-      <label class="full-field" id="request-job-field">
+      <label class="full-field">
         <span>Trabajo solicitado</span>
         <select name="job" required>
           <option value="">Seleccionar trabajo</option>
@@ -525,20 +461,9 @@
         <span>Detalle del trabajo</span>
         <input name="jobOther" maxlength="80" placeholder="Ej: Enfardado, embolsado">
       </label>
-      <label class="full-field" id="request-notes-field">
-        <span>Observaciones</span>
-        <textarea name="notes" rows="3" maxlength="260" placeholder="Ej.: Acceso por camino de tierra, transportar maiz al silo, ingresar por porton norte..."></textarea>
-      </label>
-      <label class="full-field" id="request-location-field">
-        <span id="request-location-label">Ubicacion del lote</span>
-        <button class="location-select-btn" type="button" id="request-location-picker">
-          <i class="fa-solid fa-location-dot"></i>
-          <span id="request-location-text">Seleccionar ubicacion</span>
-        </button>
-        <input name="field" type="hidden">
-        <input name="locationAddress" type="hidden">
-        <input name="locationLatitude" type="hidden">
-        <input name="locationLongitude" type="hidden">
+      <label class="full-field">
+        <span>Ubicacion del lote</span>
+        <input name="field" list="field-suggestions" required maxlength="120" placeholder="Campo / zona / partido">
       </label>
       <datalist id="field-suggestions">
         <option value="Campo La Esperanza / Zona Norte / Pergamino"></option>
@@ -550,79 +475,7 @@
       <div class="form-actions">
         <button class="btn ghost" type="button" id="request-cancel">Cancelar</button>
         <button class="btn primary" type="submit" id="request-submit">
-          <span class="btn-label">Solicitar reserva</span>
-        </button>
-      </div>
-    </form>
-  </div>
-
-  <!-- MODAL SELECTOR DE UBICACION -->
-  <div class="modal-backdrop location-picker-backdrop" id="location-picker-modal" hidden>
-    <div class="modal location-picker-modal">
-      <div class="modal-head">
-        <div>
-          <p class="eyebrow">Ubicacion del trabajo</p>
-          <h2>Seleccionar ubicacion</h2>
-        </div>
-        <button class="icon-btn" type="button" id="location-picker-close" aria-label="Cerrar selector de ubicacion">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-      </div>
-      <div class="location-picker-tools">
-        <button class="btn ghost" type="button" id="location-current-btn">
-          <i class="fa-solid fa-location-crosshairs"></i> Usar mi ubicacion actual
-        </button>
-        <p id="location-picker-status">Toca el mapa para marcar el punto del trabajo.</p>
-      </div>
-      <div class="location-map" id="location-map" aria-label="Mapa para seleccionar ubicacion"></div>
-      <div class="location-selected">
-        <i class="fa-solid fa-map-pin"></i>
-        <strong id="location-selected-address">Sin ubicacion seleccionada</strong>
-      </div>
-      <div class="form-actions">
-        <button class="btn ghost" type="button" id="location-picker-cancel">Cancelar</button>
-        <button class="btn primary" type="button" id="location-confirm-btn">
-          <i class="fa-solid fa-check"></i> Confirmar ubicacion
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL DENUNCIA -->
-  <div class="modal-backdrop" id="report-modal" hidden>
-    <form class="modal report-modal" id="report-form" novalidate>
-      <div class="modal-head">
-        <div>
-          <p class="eyebrow">Revision de publicacion</p>
-          <h2>Denunciar maquinaria</h2>
-        </div>
-        <button class="icon-btn" type="button" id="report-close" aria-label="Cerrar denuncia">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-      </div>
-      <input type="hidden" name="machineId">
-      <p class="report-target" id="report-target">Publicacion seleccionada</p>
-      <label class="full-field">
-        <span>Motivo</span>
-        <select name="reason" required>
-          <option value="">Seleccionar motivo</option>
-          <option value="Datos incorrectos">Datos incorrectos</option>
-          <option value="Precio sospechoso">Precio sospechoso</option>
-          <option value="Publicacion duplicada">Publicacion duplicada</option>
-          <option value="No corresponde a maquinaria agricola">No corresponde a maquinaria agricola</option>
-          <option value="Contacto o contenido inapropiado">Contacto o contenido inapropiado</option>
-          <option value="Otro">Otro</option>
-        </select>
-      </label>
-      <label class="full-field conditional-field" id="report-other-field" hidden>
-        <span>Detalle</span>
-        <textarea name="details" rows="4" maxlength="260" placeholder="Contanos brevemente que viste"></textarea>
-      </label>
-      <p class="form-error" id="report-error" role="alert" hidden></p>
-      <div class="form-actions">
-        <button class="btn ghost" type="button" id="report-cancel">Cancelar</button>
-        <button class="btn danger" type="submit">
-          <span class="btn-label"><i class="fa-solid fa-flag"></i> Enviar denuncia</span>
+          <span class="btn-label">Enviar solicitud</span>
         </button>
       </div>
     </form>
@@ -649,7 +502,6 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>

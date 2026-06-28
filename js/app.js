@@ -4,6 +4,7 @@ const STORAGE_KEYS = {
   machines: "nexudrive_mvp_machines",
   reservations: "nexudrive_mvp_reservations",
   auth: "nexudrive_mvp_auth",
+  theme: "nexudrive_mvp_theme",
 };
 
 const seedMachines = [
@@ -13,7 +14,8 @@ const seedMachines = [
     category: "Tractor",
     price: 35,
     location: "Venado Tuerto, Santa Fe",
-    availability: "Disponible esta semana",
+    availability: "Disponible ma\u00f1ana",
+    availableTomorrow: true,
     owner: "Agroservicios Norte",
     description: "Tractor de 120 HP para labores generales, listo para coordinar por hectárea.",
     highlight: "Disponible para labores generales",
@@ -27,6 +29,7 @@ const seedMachines = [
     price: 85,
     location: "Pergamino, Buenos Aires",
     availability: "Disponible",
+    availableToday: true,
     owner: "Contratistas Pergamino",
     description: "Equipo para granos gruesos con mantenimiento al día y operador opcional.",
     highlight: "Ahorras $320.000",
@@ -54,6 +57,7 @@ const seedMachines = [
     price: 55,
     location: "Rojas, Buenos Aires",
     availability: "Disponible",
+    availableToday: true,
     owner: "Rojas Agro",
     description: "Pulverizadora autopropulsada para aplicaciones terrestres por hectárea.",
     highlight: "Ahorras $95.000",
@@ -132,11 +136,12 @@ const state = {
   offersTab:    "activas",
   category:     "Todas",
   search:       "",
-  filters:      { availability: "Todas", service: "Todos", reputation: "Todas" },
+  filters:      { availability: "Todas", service: "Todos", reputation: "Todas", todayOnly: false },
   filterDraft:  null,
   machines:     readJSON(STORAGE_KEYS.machines, seedMachines),
   reservations: readJSON(STORAGE_KEYS.reservations, []),
   auth:         readObject(STORAGE_KEYS.auth, null),
+  theme:        normalizeTheme(localStorage.getItem(STORAGE_KEYS.theme)),
   profile:      readObject("nexudrive_mvp_profile", {
     name:     "",
     zone:     "Pergamino, Buenos Aires",
@@ -149,6 +154,7 @@ const state = {
 
 // Pending confirm action
 let pendingAction = null;
+const locationPickerState = { map: null, marker: null, form: null, selected: null };
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -156,12 +162,15 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 document.addEventListener("DOMContentLoaded", init);
 
 function init() {
+  applyTheme(state.theme);
   bindNavigation();
   bindForms();
   bindPublishWizard();
   bindProfile();
   bindAuth();
   bindConfirmModal();
+  bindReportModal();
+  bindLocationPicker();
   bindOffersTabs();
   render();
 }
@@ -194,6 +203,10 @@ function bindNavigation() {
   $("#reputation-filter").addEventListener("change", (e) => {
     ensureFilterDraft();
     state.filterDraft.filters.reputation = e.target.value;
+  });
+  $("#today-filter").addEventListener("change", (e) => {
+    ensureFilterDraft();
+    state.filterDraft.filters.todayOnly = e.target.checked;
   });
   $("#catalog-filters-clear").addEventListener("click", resetCatalogFilterDraft);
   $("#catalog-filters-apply").addEventListener("click", applyCatalogFilters);
@@ -292,27 +305,7 @@ function bindForms() {
     setButtonLoading(submitBtn, true, "Enviando...");
 
     setTimeout(() => {
-      const jobType = clean(form.get("job"));
-      const jobOther = clean(form.get("jobOther"));
-      state.reservations.unshift({
-        id: `r-${Date.now()}`,
-        machineId:    machine.id,
-        machineTitle: machine.title,
-        owner:        machine.owner,
-        category:     machine.category,
-        status:       "pending",
-        date:         form.get("date"),
-        dateEnd:      clean(form.get("dateEnd")),
-        dateFlexible: form.get("dateFlexible") === "on",
-        hectares:     Number(form.get("hectares")),
-        jobType,
-        jobOther,
-        job:          jobType === "Otros" && jobOther ? `${jobType}: ${jobOther}` : jobType,
-        field:        clean(form.get("field")),
-        fieldParts:   parseFieldParts(form.get("field")),
-        urgency:      clean(form.get("urgency")),
-        createdAt:    new Date().toISOString(),
-      });
+      state.reservations.unshift(reservationFromForm(formEl, machine));
       saveReservations();
       setButtonLoading(submitBtn, false);
       closeRequestModal();
@@ -325,6 +318,8 @@ function bindForms() {
   formControl(requestForm, "job").addEventListener("change", () => toggleJobOther(requestForm));
   formControl(requestForm, "date").addEventListener("change", () => syncRequestDateRange(requestForm));
   formControl(requestForm, "dateFlexible").addEventListener("change", () => syncRequestDateRange(requestForm));
+  formControl(requestForm, "hectares").addEventListener("input", () => updateRequestEstimate(requestForm));
+  $("#request-location-picker").addEventListener("click", () => openLocationPicker(requestForm));
   requestForm.addEventListener("input", hideRequestError);
 
   $("#request-close").addEventListener("click", closeRequestModal);
@@ -444,6 +439,13 @@ function bindProfile() {
     showToast("Perfil guardado.");
   });
 
+  form.querySelectorAll('input[name="theme"]').forEach((input) => {
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      setTheme(input.value);
+    });
+  });
+
   $("#logout-btn").addEventListener("click", () => {
     state.auth = null;
     saveAuth();
@@ -465,6 +467,38 @@ function profileFromForm() {
   };
 }
 
+function normalizeTheme(value) {
+  return ["normal", "dark", "field"].includes(value) ? value : "normal";
+}
+
+function applyTheme(theme) {
+  const safeTheme = normalizeTheme(theme);
+  document.documentElement.dataset.theme = safeTheme;
+  document.documentElement.style.colorScheme = safeTheme === "normal" ? "light" : "dark";
+}
+
+function setTheme(theme) {
+  state.theme = normalizeTheme(theme);
+  applyTheme(state.theme);
+  localStorage.setItem(STORAGE_KEYS.theme, state.theme);
+  syncThemeControls();
+  showToast(themeLabel(state.theme));
+}
+
+function syncThemeControls() {
+  $$("input[name='theme']").forEach((input) => {
+    input.checked = input.value === state.theme;
+  });
+}
+
+function themeLabel(theme) {
+  const labels = {
+    normal: "Modo Normal activado.",
+    dark: "Modo Oscuro activado.",
+    field: "Modo Campo activado.",
+  };
+  return labels[normalizeTheme(theme)];
+}
 function bindAuth() {
   const form = $("#auth-form");
   $$(".auth-tab").forEach((btn) => {
@@ -567,6 +601,7 @@ function render() {
   renderReservations();
   renderMisOfertas();
   renderProfile();
+  syncThemeControls();
   renderPublishStep();
   updateBadges();
 }
@@ -618,7 +653,8 @@ function renderCatalog() {
       && (!state.search || text.includes(state.search))
       && matchesAvailabilityFilter(m)
       && matchesServiceFilter(m)
-      && matchesReputationFilter(m);
+      && matchesReputationFilter(m)
+      && matchesTodayFilter(m);
   });
 
   $("#catalog-empty").hidden = items.length > 0;
@@ -629,7 +665,7 @@ function renderCatalog() {
   grid.innerHTML = items.map(machineCard).join("");
 
   $$(".request-btn").forEach((btn) => btn.addEventListener("click", () => openRequestModal(btn.dataset.machineId)));
-  $$(".report-btn").forEach((btn) => btn.addEventListener("click", () => showToast("Denuncia recibida para revision.")));
+  $$(".report-btn").forEach((btn) => btn.addEventListener("click", () => openReportModal(btn.dataset.machineId)));
 }
 
 function clearCatalogFilters() {
@@ -658,13 +694,14 @@ function applyCatalogFilters() {
 }
 
 function defaultCatalogFilters() {
-  return { availability: "Todas", service: "Todos", reputation: "Todas" };
+  return { availability: "Todas", service: "Todos", reputation: "Todas", todayOnly: false };
 }
 
 function syncCatalogFilterControls(filters = state.filters) {
   if ($("#availability-filter")) $("#availability-filter").value = filters.availability;
   if ($("#service-filter")) $("#service-filter").value = filters.service;
   if ($("#reputation-filter")) $("#reputation-filter").value = filters.reputation;
+  if ($("#today-filter")) $("#today-filter").checked = Boolean(filters.todayOnly);
 }
 
 function hasActiveCatalogFilters() {
@@ -672,7 +709,8 @@ function hasActiveCatalogFilters() {
     || state.category !== "Todas"
     || state.filters.availability !== "Todas"
     || state.filters.service !== "Todos"
-    || state.filters.reputation !== "Todas";
+    || state.filters.reputation !== "Todas"
+    || Boolean(state.filters.todayOnly);
 }
 
 function matchesAvailabilityFilter(machine) {
@@ -697,15 +735,35 @@ function matchesReputationFilter(machine) {
   if (filter === "Todas") return true;
   return typeof machine.rating === "number" && machine.rating >= Number(filter);
 }
+function isAvailableToday(machine) {
+  return machine.availableToday === true || textKey(machine.availability) === "disponible";
+}
+
+function isAvailableTomorrow(machine) {
+  const value = textKey(machine.availability);
+  return machine.availableTomorrow === true || value.includes("manana") || value.includes("ma\u00f1ana");
+}
+function matchesTodayFilter(machine) {
+  return !state.filters.todayOnly || isAvailableToday(machine);
+}
 function machineCard(machine) {
   const hasRating   = typeof machine.rating === "number";
   const hasDistance = typeof machine.distanceKm === "number";
+  const availableToday = isAvailableToday(machine);
+  const availableTomorrow = !availableToday && isAvailableTomorrow(machine);
+  const availabilityClass = availableToday ? "available-today" : (availableTomorrow ? "available-tomorrow" : "");
+  const availabilityBadge = availableToday
+    ? `<span class="availability-badge available-today-badge"><span class="availability-dot available-today-dot" aria-hidden="true"></span> Disponible hoy</span>`
+    : availableTomorrow
+      ? `<span class="availability-badge available-tomorrow-badge"><span class="availability-dot available-tomorrow-dot" aria-hidden="true"></span> Disponible ma\u00f1ana</span>`
+      : "";
   return `
-    <article class="machine-card">
+    <article class="machine-card ${availabilityClass}">
       <div class="machine-media">
         <i class="fa-solid ${categoryIcons[machine.category] || "fa-tractor"}"></i>
         ${machine.badge ? `<span class="machine-badge">${escapeHTML(machine.badge)}</span>` : ""}
-        <button class="floating-action report-btn" type="button" aria-label="Denunciar publicación" title="Denunciar">
+        ${availabilityBadge}
+        <button class="floating-action report-btn" type="button" aria-label="Denunciar publicación" title="Denunciar" data-machine-id="${escapeHTML(machine.id)}">
           <i class="fa-solid fa-flag"></i>
         </button>
       </div>
@@ -886,6 +944,27 @@ function offerCard(machine, tab) {
   `;
 }
 
+function solicitudSummary(reservation) {
+  if (reservation.requestMode === "truck" || reservation.category === "Camion") {
+    const tons = reservation.estimatedTons ? `${money(reservation.estimatedTons)} tn` : "toneladas a confirmar";
+    return `${formatDate(reservation.date)} � ${escapeHTML(reservation.cargoType || "Carga")} � ${tons}`;
+  }
+  if (reservation.requestMode === "harvest" || reservation.category === "Cosechadora") {
+    return `${formatDate(reservation.date)} � ${money(reservation.hectares)} ha � ${escapeHTML(reservation.crop || "Cultivo")}`;
+  }
+  if (reservation.requestMode === "bagger" || reservation.category === "Embolsadora") {
+    const tons = reservation.estimatedTons ? `${money(reservation.estimatedTons)} tn` : "toneladas a confirmar";
+    return `${formatDate(reservation.date)} � ${escapeHTML(reservation.grainType || "Grano")} � ${tons}`;
+  }
+  return `${formatDateRange(reservation)} � ${money(reservation.hectares)} ha � ${escapeHTML(reservation.job)}`;
+}
+
+function solicitudLocationSummary(reservation) {
+  if (reservation.requestMode === "truck" || reservation.category === "Camion") {
+    return `${escapeHTML(reservation.origin || "Origen a confirmar")} -> ${escapeHTML(reservation.destination || "Destino a confirmar")}`;
+  }
+  return escapeHTML(reservation.field || "Ubicacion a confirmar");
+}
 function solicitudCard(reservation) {
   const urgencyLabel = formatUrgency(reservation.urgency);
   return `
@@ -894,9 +973,9 @@ function solicitudCard(reservation) {
         <div>
           <div class="offer-solicitud-title">${escapeHTML(reservation.machineTitle)}</div>
           <div class="offer-solicitud-meta">
-            ${formatDateRange(reservation)} · ${money(reservation.hectares)} ha · ${escapeHTML(reservation.job)}
+            ${solicitudSummary(reservation)}
           </div>
-          <div class="offer-solicitud-meta">${escapeHTML(reservation.field)}${urgencyLabel ? ` · Urgencia ${urgencyLabel}` : ""}</div>
+          <div class="offer-solicitud-meta">${solicitudLocationSummary(reservation)}${urgencyLabel ? ` � Urgencia ${urgencyLabel}` : ""}</div>
         </div>
         <span class="status-pill status-pending">Pendiente</span>
       </div>
@@ -945,12 +1024,19 @@ function renderReservations() {
     )));
   $$(".start-work-reservation").forEach((btn)  => btn.addEventListener("click", () => setReservationStatus(btn.dataset.reservationId, "working")));
   $$(".finish-work-reservation").forEach((btn) => btn.addEventListener("click", () => setReservationStatus(btn.dataset.reservationId, "done")));
+  $$(".delete-finished-reservation").forEach((btn) => btn.addEventListener("click", () =>
+    confirmAction("Eliminar reserva", "Eliminar reserva del historial",
+      `${btn.dataset.title}. Esta accion quita la reserva del historial local.`,
+      () => deleteReservation(btn.dataset.reservationId),
+      "Eliminar"
+    )));
 }
 
 function reservationCard(reservation) {
   const canResolve    = reservation.status === "pending";
   const canStartWork  = reservation.status === "accepted";
   const canFinishWork = reservation.status === "working";
+  const canDeleteFinished = reservation.status === "done" || reservation.status === "rejected";
   const machine = findMachine(reservation.machineId);
   const icon = categoryIcons[reservation.category] || categoryIcons[machine?.category] || "fa-tractor";
   const requestCode = reservationCode(reservation);
@@ -974,11 +1060,7 @@ function reservationCard(reservation) {
         </div>
       </div>
       <div class="reservation-grid">
-        ${reservationMetric("fa-regular fa-calendar", "Fecha", formatDateRangeStack(reservation))}
-        ${reservationMetric("fa-solid fa-wheat-awn", "Hect&aacute;reas", `${money(reservation.hectares)} ha`)}
-        ${reservationMetric("fa-solid fa-seedling", "Trabajo", escapeHTML(reservation.job))}
-        ${reservationMetric("fa-solid fa-location-dot", "Lote", formatFieldStack(reservation.field))}
-        ${reservationMetric("fa-regular fa-clock", "Urgencia", `<span class="urgency-${escapeHTML(clean(reservation.urgency) || "media")}">${escapeHTML(urgency)}</span>`)}
+        ${reservationMetrics(reservation)}
       </div>
       ${reservationStatusTrack(reservation)}
       <div class="reservation-equipment">
@@ -1012,6 +1094,15 @@ function reservationCard(reservation) {
         <div class="reservation-actions">
           <button class="btn primary finish-work-reservation" type="button" data-reservation-id="${reservation.id}">
             <i class="fa-solid fa-flag-checkered"></i> Marcar finalizado
+          </button>
+        </div>
+      ` : ""}
+      ${canDeleteFinished ? `
+        <div class="reservation-actions">
+          <button class="btn danger delete-finished-reservation" type="button"
+            data-reservation-id="${reservation.id}"
+            data-title="${escapeHTML(reservation.machineTitle)}">
+            <i class="fa-solid fa-trash"></i> Eliminar reserva
           </button>
         </div>
       ` : ""}
@@ -1049,6 +1140,46 @@ function reservationStepIndex(status) {
   return map[status] ?? 0;
 }
 
+function reservationMetrics(reservation) {
+  if (reservation.requestMode === "truck" || reservation.category === "Camion") {
+    return [
+      reservationMetric("fa-regular fa-calendar", "Fecha", formatDate(reservation.date)),
+      reservationMetric("fa-solid fa-boxes-stacked", "Carga", escapeHTML(reservation.cargoType || "Carga")),
+      reservationMetric("fa-solid fa-weight-hanging", "Toneladas", reservation.estimatedTons ? `${money(reservation.estimatedTons)} tn` : "-"),
+      reservationMetric("fa-solid fa-location-arrow", "Origen", escapeHTML(reservation.origin || "-")),
+      reservationMetric("fa-solid fa-location-dot", "Destino", escapeHTML(reservation.destination || "-")),
+    ].join("");
+  }
+
+  if (reservation.requestMode === "harvest" || reservation.category === "Cosechadora") {
+    return [
+      reservationMetric("fa-regular fa-calendar", "Fecha", formatDate(reservation.date)),
+      reservationMetric("fa-solid fa-wheat-awn", "Hect&aacute;reas", reservation.hectares ? `${money(reservation.hectares)} ha` : "-"),
+      reservationMetric("fa-solid fa-seedling", "Cultivo", escapeHTML(reservation.crop || "-")),
+      reservationMetric("fa-solid fa-location-dot", "Ubicacion", formatFieldStack(reservation.field)),
+      reservationMetric("fa-solid fa-clipboard-list", "Trabajo", escapeHTML(reservation.job || "Cosecha")),
+    ].join("");
+  }
+
+  if (reservation.requestMode === "bagger" || reservation.category === "Embolsadora") {
+    return [
+      reservationMetric("fa-regular fa-calendar", "Fecha", formatDate(reservation.date)),
+      reservationMetric("fa-solid fa-seedling", "Grano", escapeHTML(reservation.grainType || "-")),
+      reservationMetric("fa-solid fa-weight-hanging", "Toneladas", reservation.estimatedTons ? `${money(reservation.estimatedTons)} tn` : "-"),
+      reservationMetric("fa-solid fa-location-dot", "Ubicacion", formatFieldStack(reservation.field)),
+      reservationMetric("fa-solid fa-bag-shopping", "Trabajo", escapeHTML(reservation.job || "Embolsado")),
+    ].join("");
+  }
+
+  const urgency = formatUrgency(reservation.urgency) || "Media";
+  return [
+    reservationMetric("fa-regular fa-calendar", "Fecha", formatDateRangeStack(reservation)),
+    reservationMetric("fa-solid fa-wheat-awn", "Hect&aacute;reas", reservation.hectares ? `${money(reservation.hectares)} ha` : "-"),
+    reservationMetric("fa-solid fa-seedling", "Trabajo", escapeHTML(reservation.job)),
+    reservationMetric("fa-solid fa-location-dot", "Lote", formatFieldStack(reservation.field)),
+    reservationMetric("fa-regular fa-clock", "Urgencia", `<span class="urgency-${escapeHTML(urgencyClass(reservation.urgency))}">${escapeHTML(urgency)}</span>`),
+  ].join("");
+}
 function reservationMetric(icon, label, value) {
   return `
     <div class="reservation-detail">
@@ -1106,6 +1237,16 @@ function timelineStamp(stepKey, reservation) {
   if (!time && stepKey !== "done") return "";
   return `<time>${formatDate(dateByStep[stepKey])}</time>${time ? `<strong>${time}</strong>` : ""}`;
 }
+function deleteReservation(id) {
+  const index = state.reservations.findIndex((r) => r.id === id && (r.status === "done" || r.status === "rejected"));
+  if (index === -1) return;
+  state.reservations.splice(index, 1);
+  saveReservations();
+  renderReservations();
+  renderMisOfertas();
+  updateBadges();
+  showToast("Reserva eliminada del historial.");
+}
 function setReservationStatus(id, status) {
   const res = state.reservations.find((r) => r.id === id);
   if (!res) return;
@@ -1130,22 +1271,406 @@ function openRequestModal(machineId) {
   if (!machine) return;
   const form = $("#request-form");
   form.reset();
+  resetRequestLocation(form);
   hideRequestError();
   formControl(form, "job").value = defaultJobForMachine(machine);
   toggleJobOther(form);
   formControl(form, "machineId").value = machine.id;
+  syncRequestMode(form, machine);
   formControl(form, "date").min = new Date().toISOString().slice(0, 10);
   formControl(form, "dateEnd").min = formControl(form, "date").min;
   syncRequestDateRange(form);
+  updateRequestEstimate(form);
   $("#request-title").textContent = machine.title;
   $("#request-modal").hidden = false;
   formControl(form, "date").focus();
 }
 
+const requestServiceConfigs = {
+  default: {
+    mode: "default",
+    serviceType: "general",
+    dateLabel: "Inicio estimado",
+    locationLabel: "Ubicacion del lote",
+    tonsLabel: "Toneladas aproximadas",
+    showDeadline: true,
+    showFlexible: true,
+    showUrgency: true,
+    showJob: true,
+    showCrop: false,
+    showGrain: false,
+    showHectares: true,
+    showTons: false,
+    showTransport: false,
+    showLocation: true,
+  },
+  harvest: {
+    mode: "harvest",
+    serviceType: "cosecha",
+    dateLabel: "Fecha del trabajo",
+    locationLabel: "Ubicacion",
+    tonsLabel: "Toneladas aproximadas",
+    showDeadline: false,
+    showFlexible: false,
+    showUrgency: false,
+    showJob: false,
+    showCrop: true,
+    showGrain: false,
+    showHectares: true,
+    showTons: false,
+    showTransport: false,
+    showLocation: true,
+  },
+  truck: {
+    mode: "truck",
+    serviceType: "distribucion",
+    dateLabel: "Fecha",
+    locationLabel: "Ubicacion",
+    tonsLabel: "Toneladas aproximadas",
+    showDeadline: false,
+    showFlexible: false,
+    showUrgency: false,
+    showJob: false,
+    showCrop: false,
+    showGrain: false,
+    showHectares: false,
+    showTons: true,
+    showTransport: true,
+    showLocation: false,
+  },
+  bagger: {
+    mode: "bagger",
+    serviceType: "embolsadora",
+    dateLabel: "Fecha del trabajo",
+    locationLabel: "Ubicacion",
+    tonsLabel: "Toneladas aproximadas a embolsar",
+    showDeadline: false,
+    showFlexible: false,
+    showUrgency: false,
+    showJob: false,
+    showCrop: false,
+    showGrain: true,
+    showHectares: false,
+    showTons: true,
+    showTransport: false,
+    showLocation: true,
+  },
+};
+
+function requestConfigForMachine(machine) {
+  const categoryMode = {
+    Camion: "truck",
+    Cosechadora: "harvest",
+    Embolsadora: "bagger",
+  };
+  return requestServiceConfigs[categoryMode[machine?.category] || "default"];
+}
+
+function requestModeForMachine(machine) {
+  return requestConfigForMachine(machine).mode;
+}
+
+function syncRequestMode(form, machine) {
+  const config = requestConfigForMachine(machine);
+  form.dataset.requestMode = config.mode;
+  form.dataset.serviceType = config.serviceType;
+
+  toggleField("#request-deadline-field", config.showDeadline);
+  toggleField("#request-flexible-field", config.showFlexible);
+  toggleField("#request-urgency-field", config.showUrgency);
+  toggleField("#request-job-field", config.showJob);
+  toggleField("#job-other-field", false);
+  toggleField("#request-crop-field", config.showCrop);
+  toggleField("#request-grain-field", config.showGrain);
+  toggleField(".request-hectares-field", config.showHectares);
+  toggleField("#request-tons-field", config.showTons);
+  toggleField("#request-location-field", config.showLocation);
+  toggleField("#request-transport-fields", config.showTransport);
+
+  $("#request-date-label").textContent = config.dateLabel;
+  $("#request-location-label").textContent = config.locationLabel;
+  $("#request-tons-label").textContent = config.tonsLabel;
+
+  formControl(form, "job").value = defaultJobForMachine(machine);
+  clearHiddenRequestFields(form, config);
+}
+
+function clearHiddenRequestFields(form, config) {
+  if (!config.showDeadline) formControl(form, "dateEnd").value = "";
+  if (!config.showFlexible) formControl(form, "dateFlexible").checked = false;
+  if (!config.showUrgency) formControl(form, "urgency").value = "flexible";
+  if (!config.showCrop) formControl(form, "crop").value = "";
+  if (!config.showGrain) formControl(form, "grainType").value = "";
+  if (!config.showHectares) formControl(form, "hectares").value = "";
+  if (!config.showTons) formControl(form, "estimatedTons").value = "";
+  if (!config.showTransport) {
+    formControl(form, "origin").value = "";
+    formControl(form, "destination").value = "";
+    formControl(form, "cargoType").value = "";
+  }
+  if (!config.showLocation) clearRequestLocation(form);
+}
+
+function toggleField(selector, visible) {
+  const el = $(selector);
+  if (el) el.hidden = !visible;
+}
+
+const requestPayloadBuilders = {
+  truck: buildTruckReservationPayload,
+  harvest: buildHarvestReservationPayload,
+  bagger: buildBaggerReservationPayload,
+  default: buildDefaultReservationPayload,
+};
+
+function reservationFromForm(form, machine) {
+  const config = requestConfigForMachine(machine);
+  const mode = config.mode;
+  const location = getRequestLocation(form);
+  const base = {
+    id: `r-${Date.now()}`,
+    machineId:    machine.id,
+    machineTitle: machine.title,
+    owner:        machine.owner,
+    category:     machine.category,
+    status:       "pending",
+    date:         formControl(form, "date").value,
+    serviceType:  config.serviceType,
+    jobType:      formControl(form, "job").value,
+    job:          formControl(form, "job").value,
+    notes:        clean(formControl(form, "notes").value),
+    requestMode:  mode,
+    createdAt:    new Date().toISOString(),
+  };
+  const buildPayload = requestPayloadBuilders[mode] || requestPayloadBuilders.default;
+  return compactRecord({ ...base, ...buildPayload(form, location) });
+}
+
+function buildTruckReservationPayload(form) {
+  return {
+    origin:        clean(formControl(form, "origin").value),
+    destination:   clean(formControl(form, "destination").value),
+    cargoType:     clean(formControl(form, "cargoType").value),
+    estimatedTons: Number(formControl(form, "estimatedTons").value),
+  };
+}
+
+function buildHarvestReservationPayload(form, location) {
+  return {
+    crop:       clean(formControl(form, "crop").value),
+    hectares:   Number(formControl(form, "hectares").value),
+    field:      location?.address,
+    fieldParts: parseFieldParts(location?.address),
+    location,
+  };
+}
+
+function buildBaggerReservationPayload(form, location) {
+  return {
+    grainType:     clean(formControl(form, "grainType").value),
+    estimatedTons: Number(formControl(form, "estimatedTons").value),
+    field:         location?.address,
+    fieldParts:    parseFieldParts(location?.address),
+    location,
+  };
+}
+
+function buildDefaultReservationPayload(form, location) {
+  const jobType = clean(formControl(form, "job").value);
+  const jobOther = clean(formControl(form, "jobOther").value);
+  return {
+    dateEnd:      clean(formControl(form, "dateEnd").value),
+    dateFlexible: formControl(form, "dateFlexible").checked,
+    hectares:     Number(formControl(form, "hectares").value),
+    jobOther,
+    job:          jobType === "Otros" && jobOther ? `${jobType}: ${jobOther}` : jobType,
+    field:        location?.address,
+    fieldParts:   parseFieldParts(location?.address),
+    location,
+    urgency:      clean(formControl(form, "urgency").value),
+  };
+}
+
+function compactRecord(record) {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => {
+    if (value === "" || value === null || value === undefined) return false;
+    if (typeof value === "number" && !Number.isFinite(value)) return false;
+    if (typeof value === "object" && !Array.isArray(value) && Object.values(value).every((v) => !v)) return false;
+    return true;
+  }));
+}
 function defaultJobForMachine(machine) {
   return defaultJobByCategory[machine.category] || "Otros";
 }
 
+function bindLocationPicker() {
+  const modal = $("#location-picker-modal");
+  if (!modal) return;
+  $("#location-picker-close").addEventListener("click", closeLocationPicker);
+  $("#location-picker-cancel").addEventListener("click", closeLocationPicker);
+  $("#location-confirm-btn").addEventListener("click", confirmLocationPicker);
+  $("#location-current-btn").addEventListener("click", useCurrentLocation);
+  modal.addEventListener("click", (e) => {
+    if (e.target.id === "location-picker-modal") closeLocationPicker();
+  });
+}
+
+function openLocationPicker(form) {
+  if (!window.L) {
+    showRequestError("No se pudo cargar el mapa. Revisa la conexion e intenta nuevamente.");
+    return;
+  }
+  locationPickerState.form = form;
+  locationPickerState.selected = getRequestLocation(form);
+  $("#location-picker-modal").hidden = false;
+  setLocationPickerStatus("Toca el mapa para marcar el punto del trabajo.");
+  initLocationMap();
+  const current = locationPickerState.selected;
+  const center = current ? [current.latitude, current.longitude] : [-34.6037, -58.3816];
+  locationPickerState.map.setView(center, current ? 15 : 6);
+  if (current) {
+    setLocationSelection(current.latitude, current.longitude, current.address, false);
+  } else {
+    clearLocationPickerMarker();
+  }
+  setTimeout(() => locationPickerState.map.invalidateSize(), 80);
+}
+
+function initLocationMap() {
+  if (locationPickerState.map) return;
+  const map = L.map("location-map", { zoomControl: true }).setView([-34.6037, -58.3816], 6);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap",
+  }).addTo(map);
+  map.on("click", (event) => {
+    setLocationSelection(event.latlng.lat, event.latlng.lng, "Ubicacion seleccionada", true);
+  });
+  locationPickerState.map = map;
+}
+
+function clearLocationPickerMarker() {
+  if (locationPickerState.marker && locationPickerState.map) {
+    locationPickerState.marker.remove();
+  }
+  locationPickerState.marker = null;
+  locationPickerState.selected = null;
+  $("#location-selected-address").textContent = "Sin ubicacion seleccionada";
+}
+
+function setLocationSelection(latitude, longitude, address = "Ubicacion seleccionada", shouldReverseGeocode = false) {
+  const location = {
+    address: clean(address) || "Ubicacion seleccionada",
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+  };
+  locationPickerState.selected = location;
+  const latLng = [location.latitude, location.longitude];
+  if (!locationPickerState.marker) {
+    locationPickerState.marker = L.marker(latLng, { draggable: true }).addTo(locationPickerState.map);
+    locationPickerState.marker.on("dragend", () => {
+      const next = locationPickerState.marker.getLatLng();
+      setLocationSelection(next.lat, next.lng, "Ubicacion seleccionada", true);
+    });
+  } else {
+    locationPickerState.marker.setLatLng(latLng);
+  }
+  $("#location-selected-address").textContent = location.address;
+  setLocationPickerStatus(`${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`);
+  if (shouldReverseGeocode) reverseGeocodeLocation(location.latitude, location.longitude);
+}
+
+async function reverseGeocodeLocation(latitude, longitude) {
+  setLocationPickerStatus("Buscando direccion aproximada...");
+  try {
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}&zoom=16&addressdetails=0`);
+    if (!response.ok) throw new Error("reverse geocode failed");
+    const data = await response.json();
+    const address = clean(data.display_name) || "Ubicacion seleccionada";
+    if (!locationPickerState.selected) return;
+    locationPickerState.selected.address = address;
+    $("#location-selected-address").textContent = address;
+    setLocationPickerStatus(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+  } catch {
+    if (locationPickerState.selected) locationPickerState.selected.address = locationPickerState.selected.address || "Ubicacion seleccionada";
+    $("#location-selected-address").textContent = locationPickerState.selected?.address || "Ubicacion seleccionada";
+    setLocationPickerStatus("No se pudo obtener una direccion. Puedes confirmar el punto seleccionado.");
+  }
+}
+
+function useCurrentLocation() {
+  if (!navigator.geolocation) {
+    setLocationPickerStatus("Tu navegador no permite obtener la ubicacion actual.");
+    return;
+  }
+  setLocationPickerStatus("Solicitando ubicacion actual...");
+  navigator.geolocation.getCurrentPosition((position) => {
+    const { latitude, longitude } = position.coords;
+    locationPickerState.map.setView([latitude, longitude], 15);
+    setLocationSelection(latitude, longitude, "Ubicacion seleccionada", true);
+  }, () => {
+    setLocationPickerStatus("No pudimos acceder a tu ubicacion actual.");
+  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+}
+
+function confirmLocationPicker() {
+  const form = locationPickerState.form;
+  const location = locationPickerState.selected;
+  if (!form || !location) {
+    setLocationPickerStatus("Selecciona un punto en el mapa antes de confirmar.");
+    return;
+  }
+  setRequestLocation(form, location);
+  closeLocationPicker();
+  hideRequestError();
+}
+
+function closeLocationPicker() {
+  $("#location-picker-modal").hidden = true;
+  locationPickerState.form = null;
+}
+
+function setLocationPickerStatus(message) {
+  $("#location-picker-status").textContent = message;
+}
+
+function setRequestLocation(form, location) {
+  const address = clean(location.address) || "Ubicacion seleccionada";
+  formControl(form, "field").value = address;
+  formControl(form, "locationAddress").value = address;
+  formControl(form, "locationLatitude").value = String(location.latitude);
+  formControl(form, "locationLongitude").value = String(location.longitude);
+  updateRequestLocationButton(address);
+}
+
+function clearRequestLocation(form) {
+  formControl(form, "field").value = "";
+  formControl(form, "locationAddress").value = "";
+  formControl(form, "locationLatitude").value = "";
+  formControl(form, "locationLongitude").value = "";
+  updateRequestLocationButton("");
+}
+
+function resetRequestLocation(form) {
+  clearRequestLocation(form);
+  locationPickerState.selected = null;
+}
+
+function updateRequestLocationButton(address) {
+  const button = $("#request-location-picker");
+  const label = $("#request-location-text");
+  const hasAddress = Boolean(clean(address));
+  button.classList.toggle("has-location", hasAddress);
+  label.textContent = hasAddress ? address : "Seleccionar ubicacion";
+}
+
+function getRequestLocation(form) {
+  const address = clean(formControl(form, "locationAddress").value || formControl(form, "field").value);
+  const latitude = Number(formControl(form, "locationLatitude").value);
+  const longitude = Number(formControl(form, "locationLongitude").value);
+  if (!address || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return { address, latitude, longitude };
+}
 function closeRequestModal() {
   $("#request-modal").hidden = true;
   hideRequestError();
@@ -1167,31 +1692,92 @@ function syncRequestDateRange(form) {
   if (flexible) formControl(form, "dateEnd").value = "";
 }
 
+function updateRequestEstimate(form) {
+  const estimate = $("#request-estimate");
+  if (!estimate) return;
+  const config = requestServiceConfigs[form.dataset.requestMode] || requestServiceConfigs.default;
+  if (!config.showHectares) {
+    estimate.hidden = true;
+    estimate.textContent = "";
+    return;
+  }
+  const hectares = Number(formControl(form, "hectares").value);
+  if (!Number.isFinite(hectares) || hectares <= 0) {
+    estimate.hidden = true;
+    estimate.textContent = "";
+    return;
+  }
+  const hours = Math.max(1, Math.ceil(hectares / 18));
+  const label = hours <= 8
+    ? "1 jornada de trabajo"
+    : `${Math.ceil(hours / 8)} jornadas de trabajo`;
+  estimate.textContent = `Duracion estimada: ${label} � aprox. ${hours} h`;
+  estimate.hidden = false;
+}
+const requestValidators = {
+  truck: validateTruckRequest,
+  harvest: validateHarvestRequest,
+  bagger: validateBaggerRequest,
+  default: validateDefaultRequest,
+};
+
 function validateRequestForm(form) {
+  const mode = form.dataset.requestMode || "default";
   toggleJobOther(form);
   syncRequestDateRange(form);
 
-  if (!formControl(form, "date").value) return { valid: false, message: "Elegí una fecha de inicio estimada." };
+  if (!formControl(form, "date").value) return { valid: false, message: "Elegi una fecha para el trabajo." };
 
+  const validateVisibleFields = requestValidators[mode] || requestValidators.default;
+  return validateVisibleFields(form);
+}
+
+function validateTruckRequest(form) {
+  if (!clean(formControl(form, "origin").value)) return { valid: false, message: "Indica el origen del viaje." };
+  if (!clean(formControl(form, "destination").value)) return { valid: false, message: "Indica el destino del viaje." };
+  if (!clean(formControl(form, "cargoType").value)) return { valid: false, message: "Indica el tipo de carga." };
+  const tons = Number(formControl(form, "estimatedTons").value);
+  if (!Number.isFinite(tons) || tons <= 0) return { valid: false, message: "Ingresa toneladas aproximadas con un numero mayor a 0." };
+  return { valid: true, message: "" };
+}
+
+function validateHarvestRequest(form) {
+  if (!clean(formControl(form, "crop").value)) return { valid: false, message: "Indica el cultivo." };
   const hectares = Number(formControl(form, "hectares").value);
   if (!Number.isFinite(hectares) || hectares <= 0) {
-    return { valid: false, message: "Ingresá hectáreas con un número mayor a 0." };
+    return { valid: false, message: "Ingresa hectareas a trabajar con un numero mayor a 0." };
+  }
+  if (!getRequestLocation(form)) return { valid: false, message: "Selecciona la ubicacion exacta en el mapa." };
+  return { valid: true, message: "" };
+}
+
+function validateBaggerRequest(form) {
+  if (!clean(formControl(form, "grainType").value)) return { valid: false, message: "Indica el tipo de grano." };
+  const tons = Number(formControl(form, "estimatedTons").value);
+  if (!Number.isFinite(tons) || tons <= 0) return { valid: false, message: "Ingresa toneladas aproximadas a embolsar con un numero mayor a 0." };
+  if (!getRequestLocation(form)) return { valid: false, message: "Selecciona la ubicacion exacta en el mapa." };
+  return { valid: true, message: "" };
+}
+
+function validateDefaultRequest(form) {
+  const hectares = Number(formControl(form, "hectares").value);
+  if (!Number.isFinite(hectares) || hectares <= 0) {
+    return { valid: false, message: "Ingresa hectareas a trabajar con un numero mayor a 0." };
   }
 
-  if (!formControl(form, "job").value) return { valid: false, message: "Seleccioná el trabajo solicitado." };
+  if (!formControl(form, "job").value) return { valid: false, message: "Selecciona el trabajo solicitado." };
 
   const dateEnd = formControl(form, "dateEnd").value;
   if (dateEnd && dateEnd < formControl(form, "date").value) {
-    return { valid: false, message: "La fecha fin no puede ser anterior a la fecha de inicio." };
+    return { valid: false, message: "La fecha limite no puede ser anterior al inicio estimado." };
   }
 
-  if (!clean(formControl(form, "field").value)) {
-    return { valid: false, message: "Indicá la ubicación del lote como campo / zona / partido." };
+  if (!getRequestLocation(form)) {
+    return { valid: false, message: "Selecciona la ubicacion exacta en el mapa." };
   }
 
   return { valid: true, message: "" };
 }
-
 function showRequestError(message) {
   const error = $("#request-error");
   error.textContent = message;
@@ -1205,6 +1791,76 @@ function hideRequestError() {
   error.hidden = true;
 }
 
+/* ─── REPORT MODAL ─── */
+function bindReportModal() {
+  const form = $("#report-form");
+  if (!form) return;
+
+  formControl(form, "reason").addEventListener("change", () => toggleReportOther(form));
+  form.addEventListener("input", hideReportError);
+  form.addEventListener("submit", submitReportForm);
+  $("#report-close").addEventListener("click", closeReportModal);
+  $("#report-cancel").addEventListener("click", closeReportModal);
+  $("#report-modal").addEventListener("click", (e) => {
+    if (e.target.id === "report-modal") closeReportModal();
+  });
+}
+
+function openReportModal(machineId) {
+  const machine = findMachine(machineId);
+  const form = $("#report-form");
+  if (!machine || !form) return;
+  form.reset();
+  formControl(form, "machineId").value = machine.id;
+  $("#report-target").textContent = `${machine.title} � ${machine.owner}`;
+  toggleReportOther(form);
+  hideReportError();
+  $("#report-modal").hidden = false;
+  formControl(form, "reason").focus();
+}
+
+function closeReportModal() {
+  $("#report-modal").hidden = true;
+  hideReportError();
+}
+
+function toggleReportOther(form) {
+  const isOther = formControl(form, "reason").value === "Otro";
+  const details = formControl(form, "details");
+  $("#report-other-field").hidden = !isOther;
+  if (!isOther) details.value = "";
+}
+
+function submitReportForm(e) {
+  e.preventDefault();
+  const form = e.currentTarget;
+  toggleReportOther(form);
+  const reason = clean(formControl(form, "reason").value);
+  const details = clean(formControl(form, "details").value);
+  if (!reason) {
+    showReportError("Selecciona un motivo para enviar la denuncia.");
+    return;
+  }
+  if (reason === "Otro" && !details) {
+    showReportError("Contanos brevemente el motivo de la denuncia.");
+    return;
+  }
+  closeReportModal();
+  showToast("Denuncia enviada para revision.");
+}
+
+function showReportError(message) {
+  const error = $("#report-error");
+  error.textContent = message;
+  error.hidden = false;
+}
+
+function hideReportError() {
+  const error = $("#report-error");
+  if (!error) return;
+  error.textContent = "";
+  error.hidden = true;
+}
 /* ─── CONFIRM MODAL ─── */
 function confirmAction(eyebrow, title, body, onConfirm, confirmLabel = "Confirmar") {
   pendingAction = onConfirm;
@@ -1312,10 +1968,30 @@ function formatDate(value) {
 }
 
 function formatUrgency(value) {
-  const map = { baja: "Baja", media: "Media", alta: "Alta" };
+  const map = {
+    flexible: "Flexible",
+    "esta-semana": "Esta semana",
+    manana: "Manana",
+    hoy: "Hoy mismo",
+    baja: "Flexible",
+    media: "Esta semana",
+    alta: "Hoy mismo",
+  };
   return map[clean(value)] || "";
 }
 
+function urgencyClass(value) {
+  const map = {
+    flexible: "flexible",
+    "esta-semana": "semana",
+    manana: "manana",
+    hoy: "hoy",
+    baja: "flexible",
+    media: "semana",
+    alta: "hoy",
+  };
+  return map[clean(value)] || "flexible";
+}
 function parseFieldParts(value) {
   const [field = "", zone = "", district = ""] = clean(value).split("/").map((part) => clean(part));
   return { field, zone, district };
