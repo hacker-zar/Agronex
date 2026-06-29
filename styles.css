@@ -1723,19 +1723,86 @@ label input:focus, label select:focus, label textarea:focus {
 }
 
 .location-picker-tools {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
 }
 
-.location-picker-tools p {
+.location-search {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.location-search input {
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  outline: 0;
+}
+
+.location-search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 70;
+  max-height: 230px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lift);
+}
+
+.location-result-btn {
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  padding: 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.location-result-btn:hover,
+.location-result-btn:focus-visible {
+  background: var(--surface-soft);
+  outline: 0;
+}
+
+.location-result-btn small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.location-picker-status {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
   font-weight: 750;
-  text-align: right;
+  min-height: 18px;
+}
+
+.location-map-shell {
+  position: relative;
 }
 
 .location-map {
@@ -1745,6 +1812,51 @@ label input:focus, label select:focus, label textarea:focus {
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--surface-soft);
+}
+
+.location-map-error {
+  min-height: min(58vh, 480px);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-soft);
+  color: var(--muted);
+  text-align: center;
+}
+
+.location-map-error i {
+  color: var(--accent);
+  font-size: 34px;
+}
+
+.location-map-error strong {
+  color: var(--text);
+}
+
+.location-map-error p {
+  margin: 0;
+}
+
+.location-coordinates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.location-coordinates strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 .location-selected {
@@ -1765,6 +1877,18 @@ label input:focus, label select:focus, label textarea:focus {
 
 .location-selected strong {
   font-size: 13px;
+}
+
+.location-manual {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-soft);
+}
+
+.location-manual .btn {
+  margin-top: 10px;
 }
 
 .leaflet-container {
@@ -2193,16 +2317,25 @@ label input:focus, label select:focus, label textarea:focus {
   }
 
   .location-picker-tools {
+    grid-template-columns: 1fr;
     align-items: stretch;
-    flex-direction: column;
   }
 
-  .location-picker-tools p {
-    text-align: left;
+  .location-search {
+    grid-template-columns: auto 1fr;
   }
 
-  .location-map {
+  .location-search .btn {
+    grid-column: 1 / -1;
+  }
+
+  .location-map,
+  .location-map-error {
     min-height: 58vh;
+  }
+
+  .location-coordinates {
+    justify-content: space-between;
   }
 
   .filter-group { gap: 9px; }

@@ -12,6 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,650;9..144,750&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -157,7 +158,7 @@
             <div class="card-footer">
               <div class="price">
                 <strong id="publish-preview-price">USD -</strong>
-                <span>por hectarea</span>
+                <span id="publish-preview-price-unit">unidad a definir</span>
               </div>
               <button class="btn primary" type="button" disabled>Solicitar</button>
             </div>
@@ -189,10 +190,13 @@
               <button class="pub-cat-btn" type="button" data-category="Sembradora"><i class="fa-solid fa-seedling"></i><span>Sembradora</span></button>
               <button class="pub-cat-btn" type="button" data-category="Cosechadora"><i class="fa-solid fa-wheat-awn"></i><span>Cosechadora</span></button>
               <button class="pub-cat-btn" type="button" data-category="Pulverizadora"><i class="fa-solid fa-spray-can-sparkles"></i><span>Pulverizadora</span></button>
+              <button class="pub-cat-btn" type="button" data-category="Fertilizadora"><i class="fa-solid fa-leaf"></i><span>Fertilizadora</span></button>
               <button class="pub-cat-btn" type="button" data-category="Camion"><i class="fa-solid fa-truck"></i><span>Camión</span></button>
               <button class="pub-cat-btn" type="button" data-category="Embolsadora"><i class="fa-solid fa-bag-shopping"></i><span>Embolsadora</span></button>
+              <button class="pub-cat-btn" type="button" data-category="Extractora"><i class="fa-solid fa-industry"></i><span>Extractora</span></button>
               <button class="pub-cat-btn" type="button" data-category="Dron"><i class="fa-solid fa-helicopter"></i><span>Dron</span></button>
               <button class="pub-cat-btn" type="button" data-category="Tolva"><i class="fa-solid fa-truck-ramp-box"></i><span>Tolva</span></button>
+              <button class="pub-cat-btn" type="button" data-category="Otros"><i class="fa-solid fa-screwdriver-wrench"></i><span>Otros</span></button>
             </div>
           </div>
 
@@ -207,9 +211,21 @@
                 <span>Titulo</span>
                 <input name="title" required maxlength="80" placeholder="Ej: Cosechadora Case IH 8250">
               </label>
-              <label>
-                <span>Precio por hectarea</span>
-                <input name="price" required type="number" min="1" max="10000" placeholder="85">
+              <label id="publish-price-field">
+                <span id="publish-price-label">Precio</span>
+                <input name="price" required type="number" min="1" max="100000000" placeholder="25000">
+              </label>
+              <label id="publish-price-unit-field">
+                <span>Modalidad de cobro</span>
+                <select name="priceUnit" id="publish-price-unit" required></select>
+              </label>
+              <label id="publish-min-hectares-field" hidden>
+                <span>Minimo de hectareas (opcional)</span>
+                <input name="minHectares" type="number" min="1" max="100000" step="1" inputmode="numeric" placeholder="Ej: 50">
+              </label>
+              <label id="publish-daily-capacity-field" hidden>
+                <span>Capacidad por dia (opcional)</span>
+                <input name="dailyCapacity" type="number" min="1" max="100000" step="1" inputmode="numeric" placeholder="Ej: 120 ha/dia">
               </label>
               <label>
                 <span>Zona</span>
@@ -576,19 +592,50 @@
         </button>
       </div>
       <div class="location-picker-tools">
+        <form class="location-search" id="location-search-form">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input id="location-search-input" type="search" autocomplete="off" placeholder="Buscar direccion o ingresar coordenadas">
+          <button class="btn btn-sm ghost" type="submit">Buscar</button>
+          <div class="location-search-results" id="location-search-results" hidden></div>
+        </form>
         <button class="btn ghost" type="button" id="location-current-btn">
-          <i class="fa-solid fa-location-crosshairs"></i> Usar mi ubicacion actual
+          <i class="fa-solid fa-location-crosshairs"></i> Mi ubicacion
         </button>
-        <p id="location-picker-status">Toca el mapa para marcar el punto del trabajo.</p>
       </div>
-      <div class="location-map" id="location-map" aria-label="Mapa para seleccionar ubicacion"></div>
+      <p class="location-picker-status" id="location-picker-status">Busca una direccion o toca el mapa para marcar el punto del trabajo.</p>
+      <div class="location-map-shell" id="location-map-shell">
+        <div class="location-map" id="location-map" aria-label="Mapa para seleccionar ubicacion"></div>
+        <div class="location-map-error" id="location-map-error" hidden>
+          <i class="fa-solid fa-map-location-dot"></i>
+          <strong>No pudimos cargar el mapa.</strong>
+          <p>Podés reintentar o ingresar coordenadas manualmente.</p>
+          <button class="btn ghost" type="button" id="location-retry-btn">Reintentar</button>
+        </div>
+      </div>
+      <div class="location-coordinates">
+        <span>Lat: <strong id="location-selected-lat">-</strong></span>
+        <span>Lon: <strong id="location-selected-lon">-</strong></span>
+      </div>
       <div class="location-selected">
         <i class="fa-solid fa-map-pin"></i>
         <strong id="location-selected-address">Sin ubicacion seleccionada</strong>
       </div>
+      <div class="location-manual" id="location-manual-panel" hidden>
+        <div class="form-grid">
+          <label>
+            <span>Latitud</span>
+            <input id="location-manual-lat" type="number" step="0.000001" min="-90" max="90" placeholder="-33.512421">
+          </label>
+          <label>
+            <span>Longitud</span>
+            <input id="location-manual-lon" type="number" step="0.000001" min="-180" max="180" placeholder="-60.143212">
+          </label>
+        </div>
+        <button class="btn ghost" type="button" id="location-manual-use">Usar estas coordenadas</button>
+      </div>
       <div class="form-actions">
         <button class="btn ghost" type="button" id="location-picker-cancel">Cancelar</button>
-        <button class="btn primary" type="button" id="location-confirm-btn">
+        <button class="btn primary" type="button" id="location-confirm-btn" disabled>
           <i class="fa-solid fa-check"></i> Confirmar ubicacion
         </button>
       </div>
@@ -735,6 +782,7 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>

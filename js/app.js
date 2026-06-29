@@ -99,27 +99,59 @@ const categoryIcons = {
   Sembradora:   "fa-seedling",
   Cosechadora:  "fa-wheat-awn",
   Pulverizadora:"fa-spray-can-sparkles",
+  Fertilizadora:"fa-leaf",
   Dron:         "fa-helicopter",
   Camion:       "fa-truck",
   Embolsadora:  "fa-bag-shopping",
+  Extractora:   "fa-industry",
+  Otros:        "fa-screwdriver-wrench",
   Acoplado:     "fa-trailer",
   Tolva:        "fa-truck-ramp-box",
 };
 
-const categoryOrder = ["Todas", "Tractor", "Sembradora", "Pulverizadora", "Cosechadora", "Camion", "Embolsadora", "Dron", "Acoplado", "Tolva"];
+const categoryOrder = ["Todas", "Tractor", "Sembradora", "Pulverizadora", "Fertilizadora", "Cosechadora", "Camion", "Embolsadora", "Extractora", "Dron", "Acoplado", "Tolva", "Otros"];
 
 const defaultJobByCategory = {
   Tractor: "Labores generales",
   Sembradora: "Siembra",
   Pulverizadora: "Pulverizacion / Fumigacion",
+  Fertilizadora: "Labores generales",
   Cosechadora: "Cosecha",
   Camion: "Distribucion",
   Embolsadora: "Embolsado",
+  Extractora: "Embolsado",
   Dron: "Pulverizacion / Fumigacion",
   Acoplado: "Distribucion",
   Tolva: "Apoyo a cosecha",
+  Otros: "Otros",
 };
 
+const priceUnitMeta = {
+  hectarea: { label: "Por hectarea", short: "/ ha", preview: "por hectarea", priceLabel: "Precio por hectarea", placeholder: "25000" },
+  tonelada: { label: "Por tonelada", short: "/ tn", preview: "por tonelada", priceLabel: "Precio por tonelada", placeholder: "6500" },
+  bolsa: { label: "Por bolsa", short: "/ bolsa", preview: "por bolsa", priceLabel: "Precio por bolsa", placeholder: "18000" },
+  viaje: { label: "Por viaje", short: "/ viaje", preview: "por viaje", priceLabel: "Precio por viaje", placeholder: "120000" },
+  kilometro: { label: "Por kilometro", short: "/ km", preview: "por kilometro", priceLabel: "Precio por kilometro", placeholder: "9000" },
+  tonelada_kilometro: { label: "Por tonelada/kilometro", short: "/ tn/km", preview: "por tonelada/km", priceLabel: "Precio por tonelada/kilometro", placeholder: "180" },
+  hora: { label: "Por hora", short: "/ hora", preview: "por hora", priceLabel: "Precio por hora", placeholder: "35000" },
+  dia: { label: "Por dia", short: "/ dia", preview: "por dia", priceLabel: "Precio por dia", placeholder: "250000" },
+  fijo: { label: "Precio fijo", short: "precio fijo", preview: "precio fijo", priceLabel: "Precio fijo", placeholder: "180000" },
+};
+
+const priceUnitsByCategory = {
+  Cosechadora: ["hectarea"],
+  Sembradora: ["hectarea"],
+  Pulverizadora: ["hectarea"],
+  Fertilizadora: ["hectarea"],
+  Embolsadora: ["tonelada", "bolsa"],
+  Extractora: ["tonelada", "bolsa"],
+  Camion: ["viaje", "tonelada", "kilometro", "tonelada_kilometro"],
+  Dron: ["hectarea"],
+  Tolva: ["viaje", "tonelada", "hora"],
+  Tractor: ["hora", "dia", "hectarea"],
+  Otros: ["hectarea", "tonelada", "viaje", "hora", "dia", "bolsa", "fijo"],
+  default: ["hectarea", "tonelada", "viaje", "hora", "dia", "bolsa", "fijo"],
+};
 const statusLabels = {
   pending:  "Pendiente",
   accepted: "Aceptada",
@@ -147,7 +179,7 @@ const state = {
   search:       "",
   filters:      { availability: "Todas", service: "Todos", reputation: "Todas", todayOnly: false },
   filterDraft:  null,
-  machines:     readJSON(STORAGE_KEYS.machines, seedMachines),
+  machines:     readJSON(STORAGE_KEYS.machines, seedMachines).map(normalizeMachinePricing),
   reservations: readJSON(STORAGE_KEYS.reservations, []),
   rescheduleRequests: readJSON(STORAGE_KEYS.reschedules, []),
   delayRecords: readJSON(STORAGE_KEYS.delays, []),
@@ -187,6 +219,8 @@ function init() {
   bindLocationPicker();
   bindOffersTabs();
   render();
+  persistMachinePricingMigration();
+  openLocationDemoFromQuery();
 }
 
 /* ─── NAVIGATION ─── */
@@ -256,6 +290,18 @@ function currentCatalogFilterState() {
 window.openCatalogFilters = openCatalogFilters;
 window.closeCatalogFilters = closeCatalogFilters;
 
+function openLocationDemoFromQuery() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("demoLocation")) return;
+  window.setTimeout(() => {
+    const machine = state.machines.find((item) => item.offerStatus !== "inactive") || state.machines[0];
+    const form = $("#request-form");
+    if (!machine || !form) return;
+    showScreen("catalogo");
+    openRequestModal(machine.id);
+    openLocationPicker(form);
+  }, 300);
+}
 function showScreen(screen) {
   if (screen === "perfil" && !state.auth) screen = "acceso";
   state.screen = screen;
@@ -293,6 +339,11 @@ function bindForms() {
         title:        clean(form.get("title")),
         category:     clean(form.get("category")),
         price:        Number(form.get("price")),
+        precio:       Number(form.get("price")),
+        priceUnit:    normalizePriceUnit(form.get("priceUnit"), clean(form.get("category"))),
+        unidad_precio: normalizePriceUnit(form.get("priceUnit"), clean(form.get("category"))),
+        minHectares:  optionalNumber(form.get("minHectares")),
+        dailyCapacity: optionalNumber(form.get("dailyCapacity")),
         location:     clean(form.get("location")),
         availability: availabilityLabelForSlot(availabilitySlot),
         plate:        normalizePlate(form.get("plate")),
@@ -362,6 +413,7 @@ function bindPublishWizard() {
       $("#publish-category").value = btn.dataset.category;
       $$("#publish-category-grid .pub-cat-btn").forEach((b) => b.classList.toggle("selected", b === btn));
       syncPublishPlateField(btn.dataset.category);
+      syncPublishPricingFields(btn.dataset.category);
       updatePublishPreview();
     });
   });
@@ -378,6 +430,7 @@ function bindPublishWizard() {
   });
 
   $("#publish-form").addEventListener("input", updatePublishPreview);
+  $("#publish-form").addEventListener("change", updatePublishPreview);
   renderPublishStep();
   updatePublishPreview();
 }
@@ -392,8 +445,84 @@ function renderPublishStep() {
   $("#publish-back").hidden   = state.publishStep === 1;
   $("#publish-next").hidden   = state.publishStep === 3;
   $("#publish-submit").hidden = state.publishStep !== 3;
+  syncPublishPricingFields($("#publish-category")?.value);
 }
 
+function syncPublishPricingFields(categoryOverride) {
+  const form = $("#publish-form");
+  if (!form) return;
+  const category = clean(categoryOverride || formControl(form, "category")?.value);
+  const unitSelect = formControl(form, "priceUnit");
+  if (!unitSelect) return;
+  const units = priceUnitsForCategory(category);
+  const previous = clean(unitSelect.value);
+  if (unitSelect.dataset.category !== category) {
+    unitSelect.innerHTML = units.map((unit) => `<option value="${unit}">${escapeHTML(priceUnitMeta[unit]?.label || unit)}</option>`).join("");
+    unitSelect.dataset.category = category;
+  }
+  unitSelect.value = units.includes(previous) ? previous : units[0];
+  const activeUnit = normalizePriceUnit(unitSelect.value, category);
+  const meta = priceUnitMeta[activeUnit] || priceUnitMeta.hectarea;
+  $("#publish-price-label").textContent = meta.priceLabel;
+  formControl(form, "price").placeholder = meta.placeholder;
+  const isHarvest = category === "Cosechadora";
+  $("#publish-min-hectares-field").hidden = !isHarvest;
+  $("#publish-daily-capacity-field").hidden = !isHarvest;
+  if (!isHarvest) {
+    formControl(form, "minHectares").value = "";
+    formControl(form, "dailyCapacity").value = "";
+  }
+}
+
+function priceUnitsForCategory(category) {
+  return priceUnitsByCategory[category] || priceUnitsByCategory.default;
+}
+
+function normalizePriceUnit(unit, category = "") {
+  const cleanUnit = clean(unit);
+  const units = priceUnitsForCategory(category);
+  if (units.includes(cleanUnit)) return cleanUnit;
+  if (priceUnitMeta[cleanUnit]) return cleanUnit;
+  return units[0] || "hectarea";
+}
+
+function normalizeMachinePricing(machine) {
+  const category = clean(machine?.category);
+  return {
+    ...machine,
+    price: Number(machine?.price ?? machine?.precio ?? 0),
+    precio: Number(machine?.precio ?? machine?.price ?? 0),
+    priceUnit: normalizePriceUnit(machine?.priceUnit || machine?.unidad_precio || machine?.unitPrice || "hectarea", category),
+    unidad_precio: normalizePriceUnit(machine?.unidad_precio || machine?.priceUnit || machine?.unitPrice || "hectarea", category),
+  };
+}
+
+function persistMachinePricingMigration() {
+  const needsMigration = state.machines.some((machine) => !machine.unidad_precio || !machine.priceUnit || machine.precio === undefined);
+  if (!needsMigration) return;
+  localStorage.setItem(STORAGE_KEYS.machines, JSON.stringify(state.machines.map(normalizeMachinePricing)));
+}
+
+function optionalNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function priceAmountLabel(machine) {
+  return `USD ${money(machine?.price)}`;
+}
+
+function priceUnitPreviewLabel(unit) {
+  const meta = priceUnitMeta[normalizePriceUnit(unit)] || priceUnitMeta.hectarea;
+  return meta.preview;
+}
+
+function priceDisplay(machine) {
+  const unit = normalizePriceUnit(machine?.priceUnit, machine?.category);
+  const meta = priceUnitMeta[unit] || priceUnitMeta.hectarea;
+  if (unit === "fijo") return `${priceAmountLabel(machine)} ${meta.short}`;
+  return `${priceAmountLabel(machine)}${meta.short}`;
+}
 function syncPublishPlateField(categoryOverride) {
   const form = $("#publish-form");
   const category = clean(categoryOverride ?? $("#publish-category")?.value);
@@ -410,7 +539,7 @@ function validatePublishStep() {
     return false;
   }
   if (state.publishStep === 2) {
-    const fields = ["title", "price", "location", "availabilityStart", "availabilityEnd"];
+    const fields = ["title", "price", "priceUnit", "location", "availabilityStart", "availabilityEnd"];
     const invalid = fields.find((n) => !form.elements[n].checkValidity());
     if (invalid) { form.elements[invalid].reportValidity(); return false; }
     const start = clean(form.elements.availabilityStart.value);
@@ -425,6 +554,16 @@ function validatePublishStep() {
       form.elements.estimatedHours.reportValidity();
       return false;
     }
+    const minHectares = Number(form.elements.minHectares.value || 0);
+    if (form.elements.minHectares.value && minHectares <= 0) {
+      form.elements.minHectares.reportValidity();
+      return false;
+    }
+    const dailyCapacity = Number(form.elements.dailyCapacity.value || 0);
+    if (form.elements.dailyCapacity.value && dailyCapacity <= 0) {
+      form.elements.dailyCapacity.reportValidity();
+      return false;
+    }
   }
   return true;
 }
@@ -434,6 +573,7 @@ function updatePublishPreview() {
   const selectedCategory = clean($("#publish-category")?.value);
   const category = selectedCategory || "Maquinaria";
   syncPublishPlateField(selectedCategory);
+  syncPublishPricingFields(selectedCategory);
   const icon = categoryIcons[category] || "fa-tractor";
   $("#publish-preview-icon").innerHTML = `<i class="fa-solid ${icon}"></i>`;
   $("#publish-preview-category").textContent = category;
@@ -447,7 +587,9 @@ function updatePublishPreview() {
   if (form.elements.availability) form.elements.availability.value = availabilityLabel;
   $("#publish-preview-availability").textContent = availabilityLabel;
   $("#publish-preview-owner").textContent = clean(form.elements.owner.value) || "Contratista";
+  const previewUnit = normalizePriceUnit(form.elements.priceUnit?.value, category);
   $("#publish-preview-price").textContent = form.elements.price.value ? `USD ${money(form.elements.price.value)}` : "USD -";
+  $("#publish-preview-price-unit").textContent = priceUnitPreviewLabel(previewUnit);
   const plate = normalizePlate(formControl(form, "plate")?.value);
   const showPlate = machineSupportsPlate(category) && plate;
   $("#publish-preview-plate-row").hidden = !showPlate;
@@ -457,6 +599,7 @@ function updatePublishPreview() {
 function resetPublishWizard() {
   state.publishStep = 1;
   $$("#publish-category-grid .pub-cat-btn").forEach((b) => b.classList.remove("selected"));
+  syncPublishPricingFields("");
   updatePublishPreview();
   renderPublishStep();
 }
@@ -839,8 +982,8 @@ function machineCard(machine) {
         <p class="machine-description">${escapeHTML(machine.description)}</p>
         <div class="card-footer">
           <div class="price">
-            <strong>USD ${money(machine.price)}</strong>
-            <span>por hectárea</span>
+            <strong>${priceAmountLabel(machine)}</strong>
+            <span>${priceUnitPreviewLabel(machine.priceUnit)}</span>
           </div>
           <button class="btn primary request-btn" type="button" data-machine-id="${escapeHTML(machine.id)}" ${slotUnavailable ? "disabled" : ""}>
             ${slotUnavailable ? "No disponible" : "Solicitar"}
@@ -999,7 +1142,7 @@ function offerCard(machine, tab) {
         </div>
         <div class="offer-meta">
           <span><i class="fa-solid fa-location-dot"></i>${escapeHTML(machine.location)}</span>
-          <span><i class="fa-solid fa-dollar-sign"></i>USD ${money(machine.price)}/ha</span>
+          <span><i class="fa-solid fa-dollar-sign"></i>${priceDisplay(machine)}</span>
           <span><i class="fa-regular fa-calendar-check"></i>${escapeHTML(machineAvailabilityLabel(machine))}</span>
           <span><i class="fa-solid fa-layer-group"></i><strong class="status-pill ${slotStatusClass}">${escapeHTML(slotStatus)}</strong></span>
           ${reservasTotales > 0 ? `<span><i class="fa-solid fa-inbox"></i>${reservasTotales} reserva${reservasTotales > 1 ? "s" : ""}</span>` : ""}
@@ -1928,47 +2071,98 @@ function defaultJobForMachine(machine) {
 function bindLocationPicker() {
   const modal = $("#location-picker-modal");
   if (!modal) return;
-  $("#location-picker-close").addEventListener("click", closeLocationPicker);
-  $("#location-picker-cancel").addEventListener("click", closeLocationPicker);
-  $("#location-confirm-btn").addEventListener("click", confirmLocationPicker);
-  $("#location-current-btn").addEventListener("click", useCurrentLocation);
+  $("#location-picker-close")?.addEventListener("click", closeLocationPicker);
+  $("#location-picker-cancel")?.addEventListener("click", closeLocationPicker);
+  $("#location-confirm-btn")?.addEventListener("click", confirmLocationPicker);
+  $("#location-current-btn")?.addEventListener("click", useCurrentLocation);
+  $("#location-retry-btn")?.addEventListener("click", retryLocationMap);
+  $("#location-manual-use")?.addEventListener("click", useManualCoordinates);
+  $("#location-search-form")?.addEventListener("submit", submitLocationSearch);
+  $("#location-search-input")?.addEventListener("input", handleLocationSearchInput);
+  $("#location-search-results")?.addEventListener("click", (event) => {
+    const button = event.target.closest(".location-result-btn");
+    if (!button) return;
+    setLocationSelection(Number(button.dataset.lat), Number(button.dataset.lon), button.dataset.address, false, { pan: true, updateSearch: true });
+    hideLocationSearchResults();
+  });
   modal.addEventListener("click", (e) => {
     if (e.target.id === "location-picker-modal") closeLocationPicker();
   });
 }
 
 function openLocationPicker(form) {
-  if (!window.L) {
-    showRequestError("No se pudo cargar el mapa. Revisa la conexion e intenta nuevamente.");
-    return;
-  }
   locationPickerState.form = form;
   locationPickerState.selected = getRequestLocation(form);
+  locationPickerState.searchTimer = null;
+  locationPickerState.reverseToken = 0;
   $("#location-picker-modal").hidden = false;
-  setLocationPickerStatus("Toca el mapa para marcar el punto del trabajo.");
-  initLocationMap();
+  $("#location-search-input").value = locationPickerState.selected?.address || "";
+  hideLocationSearchResults();
+  setLocationPickerStatus("Busca una direccion o toca el mapa para marcar el punto del trabajo.");
+  setLocationMapUnavailable(false);
+  updateLocationSelectionUI(locationPickerState.selected);
+
+  if (!initLocationMap()) {
+    setLocationMapUnavailable(true);
+    updateLocationConfirmState();
+    return;
+  }
+
   const current = locationPickerState.selected;
   const center = current ? [current.latitude, current.longitude] : [-34.6037, -58.3816];
   locationPickerState.map.setView(center, current ? 15 : 6);
   if (current) {
-    setLocationSelection(current.latitude, current.longitude, current.address, false);
+    setLocationSelection(current.latitude, current.longitude, current.address, false, { pan: false, updateSearch: true });
   } else {
     clearLocationPickerMarker();
   }
-  setTimeout(() => locationPickerState.map.invalidateSize(), 80);
+  setTimeout(() => locationPickerState.map?.invalidateSize(), 80);
 }
 
 function initLocationMap() {
-  if (locationPickerState.map) return;
-  const map = L.map("location-map", { zoomControl: true }).setView([-34.6037, -58.3816], 6);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap",
-  }).addTo(map);
-  map.on("click", (event) => {
-    setLocationSelection(event.latlng.lat, event.latlng.lng, "Ubicacion seleccionada", true);
-  });
-  locationPickerState.map = map;
+  if (locationPickerState.map) return true;
+  if (!window.L) return false;
+  try {
+    const map = L.map("location-map", { zoomControl: true }).setView([-34.6037, -58.3816], 6);
+    const tiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(map);
+    tiles.on("tileerror", () => {
+      setLocationPickerStatus("El mapa puede estar cargando con problemas. Tambien podes ingresar coordenadas manualmente.");
+      $("#location-manual-panel").hidden = false;
+    });
+    map.on("click", (event) => {
+      setLocationSelection(event.latlng.lat, event.latlng.lng, formatCoordinates(event.latlng.lat, event.latlng.lng), true, { pan: false, updateSearch: true });
+    });
+    locationPickerState.map = map;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function retryLocationMap() {
+  setLocationMapUnavailable(false);
+  if (locationPickerState.map) {
+    locationPickerState.map.invalidateSize();
+    return;
+  }
+  if (!initLocationMap()) {
+    setLocationMapUnavailable(true);
+    return;
+  }
+  const current = locationPickerState.selected;
+  locationPickerState.map.setView(current ? [current.latitude, current.longitude] : [-34.6037, -58.3816], current ? 15 : 6);
+  if (current) setLocationSelection(current.latitude, current.longitude, current.address, false, { pan: false, updateSearch: true });
+  setTimeout(() => locationPickerState.map?.invalidateSize(), 80);
+}
+
+function setLocationMapUnavailable(isUnavailable) {
+  $("#location-map").hidden = isUnavailable;
+  $("#location-map-error").hidden = !isUnavailable;
+  $("#location-manual-panel").hidden = !isUnavailable;
+  if (isUnavailable) setLocationPickerStatus("No pudimos cargar el mapa. Podes reintentar o ingresar coordenadas manualmente.");
 }
 
 function clearLocationPickerMarker() {
@@ -1977,46 +2171,162 @@ function clearLocationPickerMarker() {
   }
   locationPickerState.marker = null;
   locationPickerState.selected = null;
-  $("#location-selected-address").textContent = "Sin ubicacion seleccionada";
+  updateLocationSelectionUI(null);
 }
 
-function setLocationSelection(latitude, longitude, address = "Ubicacion seleccionada", shouldReverseGeocode = false) {
+function setLocationSelection(latitude, longitude, address = "Ubicacion seleccionada", shouldReverseGeocode = false, options = {}) {
+  if (!isValidCoordinate(latitude, longitude)) {
+    setLocationPickerStatus("Las coordenadas ingresadas no son validas.");
+    return;
+  }
   const location = {
-    address: clean(address) || "Ubicacion seleccionada",
+    address: clean(address) || formatCoordinates(latitude, longitude),
     latitude: Number(latitude),
     longitude: Number(longitude),
   };
   locationPickerState.selected = location;
   const latLng = [location.latitude, location.longitude];
-  if (!locationPickerState.marker) {
-    locationPickerState.marker = L.marker(latLng, { draggable: true }).addTo(locationPickerState.map);
-    locationPickerState.marker.on("dragend", () => {
-      const next = locationPickerState.marker.getLatLng();
-      setLocationSelection(next.lat, next.lng, "Ubicacion seleccionada", true);
-    });
-  } else {
-    locationPickerState.marker.setLatLng(latLng);
+  if (locationPickerState.map && window.L) {
+    if (!locationPickerState.marker) {
+      locationPickerState.marker = L.marker(latLng, { draggable: true }).addTo(locationPickerState.map);
+      locationPickerState.marker.on("dragend", () => {
+        const next = locationPickerState.marker.getLatLng();
+        setLocationSelection(next.lat, next.lng, formatCoordinates(next.lat, next.lng), true, { pan: false, updateSearch: true });
+      });
+    } else {
+      locationPickerState.marker.setLatLng(latLng);
+    }
+    if (options.pan !== false) locationPickerState.map.setView(latLng, Math.max(locationPickerState.map.getZoom(), 15));
   }
-  $("#location-selected-address").textContent = location.address;
-  setLocationPickerStatus(`${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`);
+  updateLocationSelectionUI(location, options.updateSearch !== false);
+  setLocationPickerStatus("Ubicacion seleccionada. Podes ajustar el marcador o confirmar.");
   if (shouldReverseGeocode) reverseGeocodeLocation(location.latitude, location.longitude);
 }
 
+function updateLocationSelectionUI(location, updateSearch = true) {
+  const hasLocation = Boolean(location && isValidCoordinate(location.latitude, location.longitude));
+  $("#location-selected-address").textContent = hasLocation ? location.address : "Sin ubicacion seleccionada";
+  $("#location-selected-lat").textContent = hasLocation ? Number(location.latitude).toFixed(6) : "-";
+  $("#location-selected-lon").textContent = hasLocation ? Number(location.longitude).toFixed(6) : "-";
+  $("#location-manual-lat").value = hasLocation ? Number(location.latitude).toFixed(6) : "";
+  $("#location-manual-lon").value = hasLocation ? Number(location.longitude).toFixed(6) : "";
+  if (updateSearch) $("#location-search-input").value = hasLocation ? location.address : "";
+  updateLocationConfirmState();
+}
+
+function updateLocationConfirmState() {
+  const location = locationPickerState.selected;
+  $("#location-confirm-btn").disabled = !(location && isValidCoordinate(location.latitude, location.longitude));
+}
+
+function handleLocationSearchInput(event) {
+  const query = clean(event.target.value);
+  window.clearTimeout(locationPickerState.searchTimer);
+  if (!query) {
+    hideLocationSearchResults();
+    return;
+  }
+  const coordinates = parseCoordinateQuery(query);
+  if (coordinates) {
+    locationPickerState.searchTimer = window.setTimeout(() => {
+      setLocationSelection(coordinates.latitude, coordinates.longitude, formatCoordinates(coordinates.latitude, coordinates.longitude), true, { pan: true, updateSearch: true });
+      hideLocationSearchResults();
+    }, 350);
+    return;
+  }
+  if (query.length < 3) {
+    hideLocationSearchResults();
+    return;
+  }
+  locationPickerState.searchTimer = window.setTimeout(() => searchLocationQuery(query), 450);
+}
+
+function submitLocationSearch(event) {
+  event.preventDefault();
+  const query = clean($("#location-search-input").value);
+  if (!query) return;
+  const coordinates = parseCoordinateQuery(query);
+  if (coordinates) {
+    setLocationSelection(coordinates.latitude, coordinates.longitude, formatCoordinates(coordinates.latitude, coordinates.longitude), true, { pan: true, updateSearch: true });
+    hideLocationSearchResults();
+    return;
+  }
+  searchLocationQuery(query, true);
+}
+
+async function searchLocationQuery(query, autoSelectFirst = false) {
+  setLocationPickerStatus("Buscando ubicacion...");
+  try {
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&addressdetails=0&q=${encodeURIComponent(query)}`);
+    if (!response.ok) throw new Error("search failed");
+    const results = await response.json();
+    if (!Array.isArray(results) || results.length === 0) {
+      hideLocationSearchResults();
+      setLocationPickerStatus("No encontramos resultados. Proba con otra direccion o coordenadas.");
+      return;
+    }
+    if (autoSelectFirst) {
+      selectLocationSearchResult(results[0]);
+      return;
+    }
+    renderLocationSearchResults(results);
+    setLocationPickerStatus("Selecciona un resultado o toca el mapa.");
+  } catch {
+    hideLocationSearchResults();
+    setLocationPickerStatus("No pudimos buscar esa direccion. Podes ingresar coordenadas manualmente.");
+    $("#location-manual-panel").hidden = false;
+  }
+}
+
+function renderLocationSearchResults(results) {
+  const panel = $("#location-search-results");
+  panel.innerHTML = results.map((item) => {
+    const lat = Number(item.lat);
+    const lon = Number(item.lon);
+    const address = clean(item.display_name) || formatCoordinates(lat, lon);
+    return `
+      <button class="location-result-btn" type="button" data-lat="${lat}" data-lon="${lon}" data-address="${escapeHTML(address)}">
+        <span>${escapeHTML(address)}</span>
+        <small>${formatCoordinates(lat, lon)}</small>
+      </button>
+    `;
+  }).join("");
+  panel.hidden = false;
+}
+
+function selectLocationSearchResult(item) {
+  const latitude = Number(item.lat);
+  const longitude = Number(item.lon);
+  const address = clean(item.display_name) || formatCoordinates(latitude, longitude);
+  setLocationSelection(latitude, longitude, address, false, { pan: true, updateSearch: true });
+  hideLocationSearchResults();
+}
+
+function hideLocationSearchResults() {
+  const panel = $("#location-search-results");
+  if (!panel) return;
+  panel.hidden = true;
+  panel.innerHTML = "";
+}
+
 async function reverseGeocodeLocation(latitude, longitude) {
+  const token = (locationPickerState.reverseToken || 0) + 1;
+  locationPickerState.reverseToken = token;
   setLocationPickerStatus("Buscando direccion aproximada...");
   try {
     const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}&zoom=16&addressdetails=0`);
     if (!response.ok) throw new Error("reverse geocode failed");
     const data = await response.json();
-    const address = clean(data.display_name) || "Ubicacion seleccionada";
-    if (!locationPickerState.selected) return;
-    locationPickerState.selected.address = address;
-    $("#location-selected-address").textContent = address;
-    setLocationPickerStatus(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+    if (locationPickerState.reverseToken !== token || !locationPickerState.selected) return;
+    const fallback = formatCoordinates(latitude, longitude);
+    locationPickerState.selected.address = clean(data.display_name) || fallback;
+    updateLocationSelectionUI(locationPickerState.selected, true);
+    setLocationPickerStatus("Direccion aproximada encontrada.");
   } catch {
-    if (locationPickerState.selected) locationPickerState.selected.address = locationPickerState.selected.address || "Ubicacion seleccionada";
-    $("#location-selected-address").textContent = locationPickerState.selected?.address || "Ubicacion seleccionada";
-    setLocationPickerStatus("No se pudo obtener una direccion. Puedes confirmar el punto seleccionado.");
+    if (!locationPickerState.selected) return;
+    locationPickerState.selected.address = formatCoordinates(latitude, longitude);
+    updateLocationSelectionUI(locationPickerState.selected, true);
+    setLocationPickerStatus("No se encontro direccion cercana. Se guardaran las coordenadas.");
   }
 }
 
@@ -2028,18 +2338,29 @@ function useCurrentLocation() {
   setLocationPickerStatus("Solicitando ubicacion actual...");
   navigator.geolocation.getCurrentPosition((position) => {
     const { latitude, longitude } = position.coords;
-    locationPickerState.map.setView([latitude, longitude], 15);
-    setLocationSelection(latitude, longitude, "Ubicacion seleccionada", true);
+    if (locationPickerState.map) locationPickerState.map.setView([latitude, longitude], 15);
+    setLocationSelection(latitude, longitude, formatCoordinates(latitude, longitude), true, { pan: false, updateSearch: true });
   }, () => {
-    setLocationPickerStatus("No pudimos acceder a tu ubicacion actual.");
+    setLocationPickerStatus("No pudimos acceder a tu ubicacion actual. Podes tocar el mapa o ingresar coordenadas.");
+    $("#location-manual-panel").hidden = false;
   }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+}
+
+function useManualCoordinates() {
+  const latitude = Number($("#location-manual-lat").value);
+  const longitude = Number($("#location-manual-lon").value);
+  if (!isValidCoordinate(latitude, longitude)) {
+    setLocationPickerStatus("Ingresa una latitud y longitud validas.");
+    return;
+  }
+  setLocationSelection(latitude, longitude, formatCoordinates(latitude, longitude), true, { pan: true, updateSearch: true });
 }
 
 function confirmLocationPicker() {
   const form = locationPickerState.form;
   const location = locationPickerState.selected;
-  if (!form || !location) {
-    setLocationPickerStatus("Selecciona un punto en el mapa antes de confirmar.");
+  if (!form || !location || !isValidCoordinate(location.latitude, location.longitude)) {
+    setLocationPickerStatus("Selecciona un punto valido antes de confirmar.");
     return;
   }
   setRequestLocation(form, location);
@@ -2049,6 +2370,7 @@ function confirmLocationPicker() {
 
 function closeLocationPicker() {
   $("#location-picker-modal").hidden = true;
+  hideLocationSearchResults();
   locationPickerState.form = null;
 }
 
@@ -2056,8 +2378,27 @@ function setLocationPickerStatus(message) {
   $("#location-picker-status").textContent = message;
 }
 
+function parseCoordinateQuery(query) {
+  const match = clean(query).match(/^(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)$/);
+  if (!match) return null;
+  const latitude = Number(match[1]);
+  const longitude = Number(match[2]);
+  return isValidCoordinate(latitude, longitude) ? { latitude, longitude } : null;
+}
+
+function isValidCoordinate(latitude, longitude) {
+  return Number.isFinite(Number(latitude))
+    && Number.isFinite(Number(longitude))
+    && Math.abs(Number(latitude)) <= 90
+    && Math.abs(Number(longitude)) <= 180;
+}
+
+function formatCoordinates(latitude, longitude) {
+  return `${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)}`;
+}
+
 function setRequestLocation(form, location) {
-  const address = clean(location.address) || "Ubicacion seleccionada";
+  const address = clean(location.address) || formatCoordinates(location.latitude, location.longitude);
   formControl(form, "field").value = address;
   formControl(form, "locationAddress").value = address;
   formControl(form, "locationLatitude").value = String(location.latitude);
@@ -2090,7 +2431,7 @@ function getRequestLocation(form) {
   const address = clean(formControl(form, "locationAddress").value || formControl(form, "field").value);
   const latitude = Number(formControl(form, "locationLatitude").value);
   const longitude = Number(formControl(form, "locationLongitude").value);
-  if (!address || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (!address || !isValidCoordinate(latitude, longitude)) return null;
   return { address, latitude, longitude };
 }
 function closeRequestModal() {
