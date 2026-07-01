@@ -502,6 +502,26 @@
           <span id="request-tons-label">Toneladas aproximadas</span>
           <input name="estimatedTons" type="number" min="1" max="10000" step="0.5" inputmode="decimal" placeholder="350">
         </label>
+        <label id="request-bags-field" hidden>
+          <span>Bolsas aproximadas</span>
+          <input name="estimatedBags" type="number" min="1" max="10000" step="1" inputmode="numeric" placeholder="14">
+        </label>
+        <label id="request-trips-field" hidden>
+          <span>Viajes estimados</span>
+          <input name="estimatedTrips" type="number" min="1" max="1000" step="1" inputmode="numeric" placeholder="3">
+        </label>
+        <label id="request-km-field" hidden>
+          <span>Kilometros estimados</span>
+          <input name="estimatedKm" type="number" min="1" max="10000" step="0.1" inputmode="decimal" placeholder="48.3">
+        </label>
+        <label id="request-hours-field" hidden>
+          <span>Horas estimadas</span>
+          <input name="estimatedServiceHours" type="number" min="1" max="1000" step="0.5" inputmode="decimal" placeholder="8">
+        </label>
+        <label id="request-days-field" hidden>
+          <span>Dias estimados</span>
+          <input name="estimatedDays" type="number" min="1" max="365" step="1" inputmode="numeric" placeholder="2">
+        </label>
         <label id="request-urgency-field">
           <span>Urgencia</span>
           <select name="urgency">
@@ -563,6 +583,15 @@
         <input name="locationLatitude" type="hidden">
         <input name="locationLongitude" type="hidden">
       </label>
+      <section class="economic-summary" id="request-economic-summary" aria-live="polite">
+        <div class="economic-summary-head">
+          <span><i class="fa-solid fa-coins"></i> Estimacion economica</span>
+          <strong id="request-estimated-total">Sin datos suficientes</strong>
+        </div>
+        <div class="economic-summary-grid" id="request-economic-lines"></div>
+        <p>El valor mostrado es una estimacion calculada con la informacion disponible.</p>
+        <p>El importe final podra variar segun la cantidad efectivamente trabajada, la modalidad de cobro del contratista y las condiciones reales del servicio.</p>
+      </section>
       <datalist id="field-suggestions">
         <option value="Campo La Esperanza / Zona Norte / Pergamino"></option>
         <option value="Lote 12 / Rojas / Buenos Aires"></option>

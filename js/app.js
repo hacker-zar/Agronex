@@ -396,8 +396,15 @@ function bindForms() {
   formControl(requestForm, "date").addEventListener("change", () => syncRequestDateRange(requestForm));
   formControl(requestForm, "dateFlexible").addEventListener("change", () => syncRequestDateRange(requestForm));
   formControl(requestForm, "hectares").addEventListener("input", () => updateRequestEstimate(requestForm));
+  ["estimatedTons", "estimatedBags", "estimatedTrips", "estimatedKm", "estimatedServiceHours", "estimatedDays", "origin", "destination"].forEach((name) => {
+    formControl(requestForm, name)?.addEventListener("input", () => updateRequestEstimate(requestForm));
+  });
   $("#request-location-picker").addEventListener("click", () => openLocationPicker(requestForm));
-  requestForm.addEventListener("input", hideRequestError);
+  requestForm.addEventListener("input", () => {
+    hideRequestError();
+    updateRequestEstimate(requestForm);
+  });
+  requestForm.addEventListener("change", () => updateRequestEstimate(requestForm));
 
   $("#request-close").addEventListener("click", closeRequestModal);
   $("#request-cancel").addEventListener("click", closeRequestModal);
@@ -509,7 +516,7 @@ function optionalNumber(value) {
 }
 
 function priceAmountLabel(machine) {
-  return `USD ${money(machine?.price)}`;
+  return `${money(machine?.price)}`;
 }
 
 function priceUnitPreviewLabel(unit) {
@@ -523,6 +530,183 @@ function priceDisplay(machine) {
   if (unit === "fijo") return `${priceAmountLabel(machine)} ${meta.short}`;
   return `${priceAmountLabel(machine)}${meta.short}`;
 }
+function requestQuantityFieldsForPriceUnit(unit) {
+  return {
+    hectares: unit === "hectarea",
+    tons: unit === "tonelada" || unit === "tonelada_kilometro",
+    bags: unit === "bolsa",
+    trips: unit === "viaje",
+    km: unit === "kilometro" || unit === "tonelada_kilometro",
+    hours: unit === "hora",
+    days: unit === "dia",
+  };
+}
+
+function estimateServiceCost({ serviceType, priceUnit, unitPrice, quantity, modifiers = {} }) {
+  const price = Number(unitPrice);
+  const qty = Number(quantity);
+  const adjustment = Object.values(modifiers).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  if (!Number.isFinite(price) || price <= 0) return { estimatedValue: null, quantity: null, priceUnit, unitPrice: price };
+  const effectiveQuantity = priceUnit === "fijo" ? 1 : qty;
+  if (!Number.isFinite(effectiveQuantity) || effectiveQuantity <= 0) {
+    return { estimatedValue: null, quantity: null, priceUnit, unitPrice: price };
+  }
+  return {
+    serviceType,
+    priceUnit,
+    unitPrice: price,
+    quantity: effectiveQuantity,
+    estimatedValue: Math.max(0, Math.round((price * effectiveQuantity) + adjustment)),
+  };
+}
+
+function requestEconomicContext(form, machine) {
+  if (!machine) return null;
+  const priceUnit = normalizePriceUnit(machine.priceUnit, machine.category);
+  const quantity = requestQuantityForUnit(form, priceUnit);
+  const estimate = estimateServiceCost({
+    serviceType: defaultJobForMachine(machine),
+    priceUnit,
+    unitPrice: machine.price,
+    quantity,
+    modifiers: {},
+  });
+  return {
+    machine,
+    serviceType: defaultJobForMachine(machine),
+    priceUnit,
+    unitPrice: Number(machine.price),
+    quantity,
+    estimate,
+  };
+}
+
+function requestQuantityForUnit(form, priceUnit) {
+  if (priceUnit === "hectarea") return Number(formControl(form, "hectares").value);
+  if (priceUnit === "tonelada") return Number(formControl(form, "estimatedTons").value);
+  if (priceUnit === "bolsa") return Number(formControl(form, "estimatedBags").value);
+  if (priceUnit === "viaje") return Number(formControl(form, "estimatedTrips").value);
+  if (priceUnit === "kilometro") return Number(formControl(form, "estimatedKm").value);
+  if (priceUnit === "hora") return Number(formControl(form, "estimatedServiceHours").value);
+  if (priceUnit === "dia") return Number(formControl(form, "estimatedDays").value);
+  if (priceUnit === "tonelada_kilometro") {
+    const tons = Number(formControl(form, "estimatedTons").value);
+    const km = Number(formControl(form, "estimatedKm").value);
+    return Number.isFinite(tons) && Number.isFinite(km) ? tons * km : NaN;
+  }
+  if (priceUnit === "fijo") return 1;
+  return NaN;
+}
+
+function requestEconomicPayload(form, machine) {
+  const context = requestEconomicContext(form, machine);
+  if (!context) return {};
+  return {
+    estimateQuantity: context.estimate.quantity,
+    estimatedCost: context.estimate.estimatedValue,
+    estimatedRevenue: context.estimate.estimatedValue,
+    estimatedValueDisclaimer: "El valor es estimado y puede variar segun el trabajo realizado.",
+  };
+}
+
+function quantityUnitLabel(priceUnit) {
+  const labels = {
+    hectarea: "ha",
+    tonelada: "tn",
+    bolsa: "bolsas",
+    viaje: "viajes",
+    kilometro: "km",
+    tonelada_kilometro: "tn/km",
+    hora: "horas",
+    dia: "dias",
+    fijo: "servicio",
+  };
+  return labels[priceUnit] || priceUnit;
+}
+
+function formatEstimatedMoney(value) {
+  return Number.isFinite(Number(value)) ? `$${money(value)}` : "Sin datos suficientes";
+}
+
+function economicSummaryLines(context, formOrReservation = null) {
+  if (!context) return [];
+  const lines = [
+    ["Servicio", context.serviceType || context.machine?.category || "Servicio"],
+    ["Tarifa", priceDisplay(context.machine || { price: context.unitPrice, priceUnit: context.priceUnit, category: context.machine?.category })],
+  ];
+  if (context.priceUnit !== "fijo" && context.estimate.quantity) {
+    lines.splice(1, 0, ["Cantidad estimada", `${money(context.estimate.quantity)} ${quantityUnitLabel(context.priceUnit)}`]);
+  }
+  if (formOrReservation) {
+    const isForm = Boolean(formOrReservation.elements);
+    const origin = formOrReservation.origin || (isForm ? clean(formControl(formOrReservation, "origin")?.value) : "");
+    const destination = formOrReservation.destination || (isForm ? clean(formControl(formOrReservation, "destination")?.value) : "");
+    const field = formOrReservation.field || (isForm ? clean(formControl(formOrReservation, "field")?.value) : "");
+    if (origin) lines.push(["Origen", origin]);
+    if (destination) lines.push(["Destino", destination]);
+    if (!origin && !destination && field) lines.push(["Ubicacion", field]);
+  }
+  return lines;
+}
+
+function economicSummaryMarkup(context, title = "Estimacion economica", totalLabel = "Costo estimado", formOrReservation = null) {
+  const lines = economicSummaryLines(context, formOrReservation);
+  return `
+    <section class="economic-summary">
+      <div class="economic-summary-head">
+        <span><i class="fa-solid fa-coins"></i> ${escapeHTML(title)}</span>
+        <strong>${formatEstimatedMoney(context?.estimate?.estimatedValue)}</strong>
+      </div>
+      <div class="economic-summary-grid">
+        ${lines.map(([label, value]) => `<div class="economic-summary-line"><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>`).join("")}
+        <div class="economic-summary-line"><span>${escapeHTML(totalLabel)}</span><strong>${formatEstimatedMoney(context?.estimate?.estimatedValue)}</strong></div>
+      </div>
+      <p>El valor mostrado es una estimacion calculada con la informacion disponible.</p>
+      <p>El importe final podra variar segun la cantidad efectivamente trabajada, la modalidad de cobro del contratista y las condiciones reales del servicio.</p>
+    </section>
+  `;
+}
+
+function reservationEconomicContext(reservation) {
+  const machine = findMachine(reservation.machineId) || {
+    category: reservation.category,
+    price: reservation.unitPrice || reservation.price,
+    priceUnit: reservation.priceUnit,
+  };
+  const priceUnit = normalizePriceUnit(reservation.priceUnit || machine.priceUnit, reservation.category || machine.category);
+  const quantity = reservation.estimateQuantity || reservationQuantityForUnit(reservation, priceUnit);
+  const estimate = estimateServiceCost({
+    serviceType: reservation.job || defaultJobForMachine(machine),
+    priceUnit,
+    unitPrice: reservation.unitPrice || machine.price,
+    quantity,
+    modifiers: {},
+  });
+  return { machine, serviceType: reservation.job || defaultJobForMachine(machine), priceUnit, unitPrice: Number(reservation.unitPrice || machine.price), quantity, estimate };
+}
+
+function reservationQuantityLabel(reservation) {
+  const context = reservationEconomicContext(reservation);
+  if (context.priceUnit === "fijo") return "precio fijo";
+  const quantity = context.estimate.quantity || context.quantity;
+  return Number.isFinite(Number(quantity)) && Number(quantity) > 0
+    ? `${money(quantity)} ${quantityUnitLabel(context.priceUnit)}`
+    : "cantidad a confirmar";
+}
+
+function reservationQuantityForUnit(reservation, priceUnit) {
+  if (priceUnit === "hectarea") return Number(reservation.hectares);
+  if (priceUnit === "tonelada") return Number(reservation.estimatedTons);
+  if (priceUnit === "bolsa") return Number(reservation.estimatedBags);
+  if (priceUnit === "viaje") return Number(reservation.estimatedTrips);
+  if (priceUnit === "kilometro") return Number(reservation.estimatedKm);
+  if (priceUnit === "hora") return Number(reservation.estimatedServiceHours);
+  if (priceUnit === "dia") return Number(reservation.estimatedDays);
+  if (priceUnit === "tonelada_kilometro") return Number(reservation.estimatedTons) * Number(reservation.estimatedKm);
+  if (priceUnit === "fijo") return 1;
+  return NaN;
+}
+
 function syncPublishPlateField(categoryOverride) {
   const form = $("#publish-form");
   const category = clean(categoryOverride ?? $("#publish-category")?.value);
@@ -588,7 +772,7 @@ function updatePublishPreview() {
   $("#publish-preview-availability").textContent = availabilityLabel;
   $("#publish-preview-owner").textContent = clean(form.elements.owner.value) || "Contratista";
   const previewUnit = normalizePriceUnit(form.elements.priceUnit?.value, category);
-  $("#publish-preview-price").textContent = form.elements.price.value ? `USD ${money(form.elements.price.value)}` : "USD -";
+  $("#publish-preview-price").textContent = form.elements.price.value ? `${money(form.elements.price.value)}` : "$ -";
   $("#publish-preview-price-unit").textContent = priceUnitPreviewLabel(previewUnit);
   const plate = normalizePlate(formControl(form, "plate")?.value);
   const showPlate = machineSupportsPlate(category) && plate;
@@ -1155,18 +1339,17 @@ function offerCard(machine, tab) {
 }
 
 function solicitudSummary(reservation) {
+  const quantity = reservationQuantityLabel(reservation);
   if (reservation.requestMode === "truck" || reservation.category === "Camion") {
-    const tons = reservation.estimatedTons ? `${money(reservation.estimatedTons)} tn` : "toneladas a confirmar";
-    return `${formatDate(reservation.date)} � ${escapeHTML(reservation.cargoType || "Carga")} � ${tons}`;
+    return `${formatDate(reservation.date)} - ${escapeHTML(reservation.cargoType || "Carga")} - ${quantity}`;
   }
   if (reservation.requestMode === "harvest" || reservation.category === "Cosechadora") {
-    return `${formatDate(reservation.date)} � ${money(reservation.hectares)} ha � ${escapeHTML(reservation.crop || "Cultivo")}`;
+    return `${formatDate(reservation.date)} - ${quantity} - ${escapeHTML(reservation.crop || "Cultivo")}`;
   }
   if (reservation.requestMode === "bagger" || reservation.category === "Embolsadora") {
-    const tons = reservation.estimatedTons ? `${money(reservation.estimatedTons)} tn` : "toneladas a confirmar";
-    return `${formatDate(reservation.date)} � ${escapeHTML(reservation.grainType || "Grano")} � ${tons}`;
+    return `${formatDate(reservation.date)} - ${escapeHTML(reservation.grainType || "Grano")} - ${quantity}`;
   }
-  return `${formatDateRange(reservation)} � ${money(reservation.hectares)} ha � ${escapeHTML(reservation.job)}`;
+  return `${formatDateRange(reservation)} - ${quantity} - ${escapeHTML(reservation.job)}`;
 }
 
 function solicitudLocationSummary(reservation) {
@@ -1177,6 +1360,7 @@ function solicitudLocationSummary(reservation) {
 }
 function solicitudCard(reservation) {
   const urgencyLabel = formatUrgency(reservation.urgency);
+  const economicContext = reservationEconomicContext(reservation);
   return `
     <div class="offer-solicitud-card">
       <div class="offer-solicitud-head">
@@ -1185,10 +1369,11 @@ function solicitudCard(reservation) {
           <div class="offer-solicitud-meta">
             ${solicitudSummary(reservation)}
           </div>
-          <div class="offer-solicitud-meta">${solicitudLocationSummary(reservation)}${urgencyLabel ? ` � Urgencia ${urgencyLabel}` : ""}</div>
+          <div class="offer-solicitud-meta">${solicitudLocationSummary(reservation)}${urgencyLabel ? ` - Urgencia ${urgencyLabel}` : ""}</div>
         </div>
         <span class="status-pill status-pending">Pendiente</span>
       </div>
+      ${economicSummaryMarkup(economicContext, "Ingreso estimado", "Total estimado", reservation)}
       <div class="offer-solicitud-actions">
         <button class="btn btn-sm danger reject-solicitud-btn" type="button"
           data-id="${reservation.id}" data-title="${escapeHTML(reservation.machineTitle)}">
@@ -1288,6 +1473,7 @@ function reservationCard(reservation) {
   const icon = categoryIcons[reservation.category] || categoryIcons[machine?.category] || "fa-tractor";
   const requestCode = reservationCode(reservation);
   const urgency = formatUrgency(reservation.urgency) || "Media";
+  const economicContext = reservationEconomicContext(reservation);
 
   return `
     <article class="reservation-card">
@@ -1309,6 +1495,7 @@ function reservationCard(reservation) {
       <div class="reservation-grid">
         ${reservationMetrics(reservation)}
       </div>
+      ${canResolve ? economicSummaryMarkup(economicContext, "Ingreso estimado", "Total estimado", reservation) : ""}
       ${reservationStatusTrack(reservation)}
       ${rescheduleSection(reservation)}
       ${delaySection(reservation)}
@@ -1518,7 +1705,7 @@ function reservationMetrics(reservation) {
     return [
       reservationMetric("fa-regular fa-calendar", "Fecha", formatDate(reservation.date)),
       reservationMetric("fa-solid fa-boxes-stacked", "Carga", escapeHTML(reservation.cargoType || "Carga")),
-      reservationMetric("fa-solid fa-weight-hanging", "Toneladas", reservation.estimatedTons ? `${money(reservation.estimatedTons)} tn` : "-"),
+      reservationMetric("fa-solid fa-calculator", "Cantidad", escapeHTML(reservationQuantityLabel(reservation))),
       reservationMetric("fa-solid fa-location-arrow", "Origen", escapeHTML(reservation.origin || "-")),
       reservationMetric("fa-solid fa-location-dot", "Destino", escapeHTML(reservation.destination || "-")),
     ].join("");
@@ -1527,7 +1714,7 @@ function reservationMetrics(reservation) {
   if (reservation.requestMode === "harvest" || reservation.category === "Cosechadora") {
     return [
       reservationMetric("fa-regular fa-calendar", "Fecha", formatDate(reservation.date)),
-      reservationMetric("fa-solid fa-wheat-awn", "Hect&aacute;reas", reservation.hectares ? `${money(reservation.hectares)} ha` : "-"),
+      reservationMetric("fa-solid fa-calculator", "Cantidad", escapeHTML(reservationQuantityLabel(reservation))),
       reservationMetric("fa-solid fa-seedling", "Cultivo", escapeHTML(reservation.crop || "-")),
       reservationMetric("fa-solid fa-location-dot", "Ubicacion", formatFieldStack(reservation.field)),
       reservationMetric("fa-solid fa-clipboard-list", "Trabajo", escapeHTML(reservation.job || "Cosecha")),
@@ -1538,7 +1725,7 @@ function reservationMetrics(reservation) {
     return [
       reservationMetric("fa-regular fa-calendar", "Fecha", formatDate(reservation.date)),
       reservationMetric("fa-solid fa-seedling", "Grano", escapeHTML(reservation.grainType || "-")),
-      reservationMetric("fa-solid fa-weight-hanging", "Toneladas", reservation.estimatedTons ? `${money(reservation.estimatedTons)} tn` : "-"),
+      reservationMetric("fa-solid fa-calculator", "Cantidad", escapeHTML(reservationQuantityLabel(reservation))),
       reservationMetric("fa-solid fa-location-dot", "Ubicacion", formatFieldStack(reservation.field)),
       reservationMetric("fa-solid fa-bag-shopping", "Trabajo", escapeHTML(reservation.job || "Embolsado")),
     ].join("");
@@ -1547,7 +1734,7 @@ function reservationMetrics(reservation) {
   const urgency = formatUrgency(reservation.urgency) || "Media";
   return [
     reservationMetric("fa-regular fa-calendar", "Fecha", formatDateRangeStack(reservation)),
-    reservationMetric("fa-solid fa-wheat-awn", "Hect&aacute;reas", reservation.hectares ? `${money(reservation.hectares)} ha` : "-"),
+    reservationMetric("fa-solid fa-calculator", "Cantidad", escapeHTML(reservationQuantityLabel(reservation))),
     reservationMetric("fa-solid fa-seedling", "Trabajo", escapeHTML(reservation.job)),
     reservationMetric("fa-solid fa-location-dot", "Lote", formatFieldStack(reservation.field)),
     reservationMetric("fa-regular fa-clock", "Urgencia", `<span class="urgency-${escapeHTML(urgencyClass(reservation.urgency))}">${escapeHTML(urgency)}</span>`),
@@ -1899,7 +2086,7 @@ const requestServiceConfigs = {
     showCrop: false,
     showGrain: false,
     showHectares: false,
-    showTons: true,
+    showTons: false,
     showTransport: true,
     showLocation: false,
   },
@@ -1916,7 +2103,7 @@ const requestServiceConfigs = {
     showCrop: false,
     showGrain: true,
     showHectares: false,
-    showTons: true,
+    showTons: false,
     showTransport: false,
     showLocation: true,
   },
@@ -1947,8 +2134,15 @@ function syncRequestMode(form, machine) {
   toggleField("#job-other-field", false);
   toggleField("#request-crop-field", config.showCrop);
   toggleField("#request-grain-field", config.showGrain);
-  toggleField(".request-hectares-field", config.showHectares);
-  toggleField("#request-tons-field", config.showTons);
+  const priceUnit = normalizePriceUnit(machine?.priceUnit, machine?.category);
+  const quantityFields = requestQuantityFieldsForPriceUnit(priceUnit);
+  toggleField(".request-hectares-field", (config.showHectares && priceUnit === "hectarea") || quantityFields.hectares);
+  toggleField("#request-tons-field", (config.showTons && ["tonelada", "tonelada_kilometro"].includes(priceUnit)) || quantityFields.tons);
+  toggleField("#request-bags-field", quantityFields.bags);
+  toggleField("#request-trips-field", quantityFields.trips);
+  toggleField("#request-km-field", quantityFields.km);
+  toggleField("#request-hours-field", quantityFields.hours);
+  toggleField("#request-days-field", quantityFields.days);
   toggleField("#request-location-field", config.showLocation);
   toggleField("#request-transport-fields", config.showTransport);
 
@@ -1961,13 +2155,20 @@ function syncRequestMode(form, machine) {
 }
 
 function clearHiddenRequestFields(form, config) {
+  const machine = findMachine(formControl(form, "machineId")?.value);
+  const quantityFields = requestQuantityFieldsForPriceUnit(normalizePriceUnit(machine?.priceUnit, machine?.category));
   if (!config.showDeadline) formControl(form, "dateEnd").value = "";
   if (!config.showFlexible) formControl(form, "dateFlexible").checked = false;
   if (!config.showUrgency) formControl(form, "urgency").value = "flexible";
   if (!config.showCrop) formControl(form, "crop").value = "";
   if (!config.showGrain) formControl(form, "grainType").value = "";
-  if (!config.showHectares) formControl(form, "hectares").value = "";
-  if (!config.showTons) formControl(form, "estimatedTons").value = "";
+  if (!config.showHectares && !quantityFields.hectares) formControl(form, "hectares").value = "";
+  if (!config.showTons && !quantityFields.tons) formControl(form, "estimatedTons").value = "";
+  if (!quantityFields.bags) formControl(form, "estimatedBags").value = "";
+  if (!quantityFields.trips) formControl(form, "estimatedTrips").value = "";
+  if (!quantityFields.km) formControl(form, "estimatedKm").value = "";
+  if (!quantityFields.hours) formControl(form, "estimatedServiceHours").value = "";
+  if (!quantityFields.days) formControl(form, "estimatedDays").value = "";
   if (!config.showTransport) {
     formControl(form, "origin").value = "";
     formControl(form, "destination").value = "";
@@ -1992,6 +2193,7 @@ function reservationFromForm(form, machine) {
   const config = requestConfigForMachine(machine);
   const mode = config.mode;
   const location = getRequestLocation(form);
+  const priceUnit = normalizePriceUnit(machine.priceUnit, machine.category);
   const base = {
     id: `r-${Date.now()}`,
     machineId:    machine.id,
@@ -2005,10 +2207,13 @@ function reservationFromForm(form, machine) {
     job:          formControl(form, "job").value,
     notes:        clean(formControl(form, "notes").value),
     requestMode:  mode,
+    unitPrice:    Number(machine.price),
+    priceUnit,
+    unidad_precio: priceUnit,
     createdAt:    new Date().toISOString(),
   };
   const buildPayload = requestPayloadBuilders[mode] || requestPayloadBuilders.default;
-  return compactRecord({ ...base, ...buildPayload(form, location) });
+  return compactRecord({ ...base, ...buildPayload(form, location), ...requestEconomicPayload(form, machine) });
 }
 
 function buildTruckReservationPayload(form) {
@@ -2016,14 +2221,25 @@ function buildTruckReservationPayload(form) {
     origin:        clean(formControl(form, "origin").value),
     destination:   clean(formControl(form, "destination").value),
     cargoType:     clean(formControl(form, "cargoType").value),
-    estimatedTons: Number(formControl(form, "estimatedTons").value),
+    estimatedTons: requestPositiveNumber(form, "estimatedTons"),
+    estimatedBags: requestPositiveNumber(form, "estimatedBags"),
+    estimatedTrips: requestPositiveNumber(form, "estimatedTrips"),
+    estimatedKm: requestPositiveNumber(form, "estimatedKm"),
+    estimatedServiceHours: requestPositiveNumber(form, "estimatedServiceHours"),
+    estimatedDays: requestPositiveNumber(form, "estimatedDays"),
   };
 }
 
 function buildHarvestReservationPayload(form, location) {
   return {
     crop:       clean(formControl(form, "crop").value),
-    hectares:   Number(formControl(form, "hectares").value),
+    hectares:   requestPositiveNumber(form, "hectares"),
+    estimatedTons: requestPositiveNumber(form, "estimatedTons"),
+    estimatedBags: requestPositiveNumber(form, "estimatedBags"),
+    estimatedTrips: requestPositiveNumber(form, "estimatedTrips"),
+    estimatedKm: requestPositiveNumber(form, "estimatedKm"),
+    estimatedServiceHours: requestPositiveNumber(form, "estimatedServiceHours"),
+    estimatedDays: requestPositiveNumber(form, "estimatedDays"),
     field:      location?.address,
     fieldParts: parseFieldParts(location?.address),
     location,
@@ -2033,7 +2249,11 @@ function buildHarvestReservationPayload(form, location) {
 function buildBaggerReservationPayload(form, location) {
   return {
     grainType:     clean(formControl(form, "grainType").value),
-    estimatedTons: Number(formControl(form, "estimatedTons").value),
+    estimatedTons: requestPositiveNumber(form, "estimatedTons"),
+    estimatedBags: requestPositiveNumber(form, "estimatedBags"),
+    estimatedKm: requestPositiveNumber(form, "estimatedKm"),
+    estimatedServiceHours: requestPositiveNumber(form, "estimatedServiceHours"),
+    estimatedDays: requestPositiveNumber(form, "estimatedDays"),
     field:         location?.address,
     fieldParts:    parseFieldParts(location?.address),
     location,
@@ -2046,7 +2266,13 @@ function buildDefaultReservationPayload(form, location) {
   return {
     dateEnd:      clean(formControl(form, "dateEnd").value),
     dateFlexible: formControl(form, "dateFlexible").checked,
-    hectares:     Number(formControl(form, "hectares").value),
+    hectares:     requestPositiveNumber(form, "hectares"),
+    estimatedTons: requestPositiveNumber(form, "estimatedTons"),
+    estimatedBags: requestPositiveNumber(form, "estimatedBags"),
+    estimatedTrips: requestPositiveNumber(form, "estimatedTrips"),
+    estimatedKm: requestPositiveNumber(form, "estimatedKm"),
+    estimatedServiceHours: requestPositiveNumber(form, "estimatedServiceHours"),
+    estimatedDays: requestPositiveNumber(form, "estimatedDays"),
     jobOther,
     job:          jobType === "Otros" && jobOther ? `${jobType}: ${jobOther}` : jobType,
     field:        location?.address,
@@ -2054,6 +2280,11 @@ function buildDefaultReservationPayload(form, location) {
     location,
     urgency:      clean(formControl(form, "urgency").value),
   };
+}
+
+function requestPositiveNumber(form, name) {
+  const value = Number(formControl(form, name)?.value);
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function compactRecord(record) {
@@ -2364,6 +2595,7 @@ function confirmLocationPicker() {
     return;
   }
   setRequestLocation(form, location);
+  updateRequestEstimate(form);
   closeLocationPicker();
   hideRequestError();
 }
@@ -2457,26 +2689,40 @@ function syncRequestDateRange(form) {
 
 function updateRequestEstimate(form) {
   const estimate = $("#request-estimate");
-  if (!estimate) return;
-  const config = requestServiceConfigs[form.dataset.requestMode] || requestServiceConfigs.default;
-  if (!config.showHectares) {
-    estimate.hidden = true;
-    estimate.textContent = "";
-    return;
+  const machine = findMachine(formControl(form, "machineId")?.value);
+  if (estimate) {
+    const hectares = Number(formControl(form, "hectares").value);
+    if (Number.isFinite(hectares) && hectares > 0 && !$(".request-hectares-field")?.hidden) {
+      const hours = Math.max(1, Math.ceil(hectares / 18));
+      const label = hours <= 8 ? "1 jornada de trabajo" : `${Math.ceil(hours / 8)} jornadas de trabajo`;
+      estimate.textContent = `Duracion estimada: ${label} � aprox. ${hours} h`;
+      estimate.hidden = false;
+    } else {
+      estimate.hidden = true;
+      estimate.textContent = "";
+    }
   }
-  const hectares = Number(formControl(form, "hectares").value);
-  if (!Number.isFinite(hectares) || hectares <= 0) {
-    estimate.hidden = true;
-    estimate.textContent = "";
-    return;
-  }
-  const hours = Math.max(1, Math.ceil(hectares / 18));
-  const label = hours <= 8
-    ? "1 jornada de trabajo"
-    : `${Math.ceil(hours / 8)} jornadas de trabajo`;
-  estimate.textContent = `Duracion estimada: ${label} � aprox. ${hours} h`;
-  estimate.hidden = false;
+  updateRequestEconomicSummary(form, machine);
 }
+
+function updateRequestEconomicSummary(form, machine) {
+  const summary = $("#request-economic-summary");
+  if (!summary) return;
+  const context = requestEconomicContext(form, machine);
+  const total = $("#request-estimated-total");
+  const lines = $("#request-economic-lines");
+  if (!context) {
+    total.textContent = "Sin datos suficientes";
+    lines.innerHTML = "";
+    return;
+  }
+  total.textContent = formatEstimatedMoney(context.estimate.estimatedValue);
+  const lineItems = economicSummaryLines(context, form);
+  lines.innerHTML = lineItems.map(([label, value]) => `
+    <div class="economic-summary-line"><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>
+  `).join("");
+}
+
 const requestValidators = {
   truck: validateTruckRequest,
   harvest: validateHarvestRequest,
@@ -2492,42 +2738,31 @@ function validateRequestForm(form) {
   if (!formControl(form, "date").value) return { valid: false, message: "Elegi una fecha para el trabajo." };
 
   const validateVisibleFields = requestValidators[mode] || requestValidators.default;
-  return validateVisibleFields(form);
+  const visibleResult = validateVisibleFields(form);
+  if (!visibleResult.valid) return visibleResult;
+  return validateEconomicQuantity(form);
 }
 
 function validateTruckRequest(form) {
   if (!clean(formControl(form, "origin").value)) return { valid: false, message: "Indica el origen del viaje." };
   if (!clean(formControl(form, "destination").value)) return { valid: false, message: "Indica el destino del viaje." };
   if (!clean(formControl(form, "cargoType").value)) return { valid: false, message: "Indica el tipo de carga." };
-  const tons = Number(formControl(form, "estimatedTons").value);
-  if (!Number.isFinite(tons) || tons <= 0) return { valid: false, message: "Ingresa toneladas aproximadas con un numero mayor a 0." };
   return { valid: true, message: "" };
 }
 
 function validateHarvestRequest(form) {
   if (!clean(formControl(form, "crop").value)) return { valid: false, message: "Indica el cultivo." };
-  const hectares = Number(formControl(form, "hectares").value);
-  if (!Number.isFinite(hectares) || hectares <= 0) {
-    return { valid: false, message: "Ingresa hectareas a trabajar con un numero mayor a 0." };
-  }
   if (!getRequestLocation(form)) return { valid: false, message: "Selecciona la ubicacion exacta en el mapa." };
   return { valid: true, message: "" };
 }
 
 function validateBaggerRequest(form) {
   if (!clean(formControl(form, "grainType").value)) return { valid: false, message: "Indica el tipo de grano." };
-  const tons = Number(formControl(form, "estimatedTons").value);
-  if (!Number.isFinite(tons) || tons <= 0) return { valid: false, message: "Ingresa toneladas aproximadas a embolsar con un numero mayor a 0." };
   if (!getRequestLocation(form)) return { valid: false, message: "Selecciona la ubicacion exacta en el mapa." };
   return { valid: true, message: "" };
 }
 
 function validateDefaultRequest(form) {
-  const hectares = Number(formControl(form, "hectares").value);
-  if (!Number.isFinite(hectares) || hectares <= 0) {
-    return { valid: false, message: "Ingresa hectareas a trabajar con un numero mayor a 0." };
-  }
-
   if (!formControl(form, "job").value) return { valid: false, message: "Selecciona el trabajo solicitado." };
 
   const dateEnd = formControl(form, "dateEnd").value;
@@ -2541,6 +2776,36 @@ function validateDefaultRequest(form) {
 
   return { valid: true, message: "" };
 }
+
+function validateEconomicQuantity(form) {
+  const machine = findMachine(formControl(form, "machineId")?.value);
+  const unit = normalizePriceUnit(machine?.priceUnit, machine?.category);
+  const labels = {
+    hectarea: "hectareas a trabajar",
+    tonelada: "toneladas aproximadas",
+    bolsa: "bolsas aproximadas",
+    viaje: "viajes estimados",
+    kilometro: "kilometros estimados",
+    tonelada_kilometro: "toneladas y kilometros estimados",
+    hora: "horas estimadas",
+    dia: "dias estimados",
+  };
+  if (unit === "fijo") return { valid: true, message: "" };
+  if (unit === "tonelada_kilometro") {
+    const tons = Number(formControl(form, "estimatedTons").value);
+    const km = Number(formControl(form, "estimatedKm").value);
+    if (!Number.isFinite(tons) || tons <= 0 || !Number.isFinite(km) || km <= 0) {
+      return { valid: false, message: "Ingresa toneladas y kilometros estimados con numeros mayores a 0." };
+    }
+    return { valid: true, message: "" };
+  }
+  const quantity = requestQuantityForUnit(form, unit);
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return { valid: false, message: `Ingresa ${labels[unit] || "la cantidad estimada"} con un numero mayor a 0.` };
+  }
+  return { valid: true, message: "" };
+}
+
 function showRequestError(message) {
   const error = $("#request-error");
   error.textContent = message;
