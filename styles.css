@@ -1307,6 +1307,236 @@ h1, h2, .page-title, .machine-title, .pub-step-hdr h2, .profile-sidebar-card h2 
 }
 
 /* ───────────── PUBLISH WIZARD ───────────── */
+.solicitud-decision {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.solicitud-exec-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.solicitud-exec-card {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 74px;
+  padding: 11px 10px;
+  border: 1px solid rgba(56,118,29,.22);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--accent-soft), var(--surface));
+}
+
+.solicitud-exec-card i {
+  color: var(--accent-strong);
+  margin-top: 2px;
+}
+
+.solicitud-exec-card span {
+  display: block;
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.solicitud-exec-card strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.25;
+  margin-top: 3px;
+}
+
+.solicitud-more {
+  margin-top: 10px;
+}
+
+.solicitud-more summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-soft);
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+  list-style: none;
+  transition: border-color .16s, background .16s, box-shadow .16s;
+}
+
+.solicitud-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.solicitud-more summary:hover,
+.solicitud-more summary:focus-visible {
+  border-color: rgba(56,118,29,.35);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  outline: none;
+}
+
+.solicitud-more summary i {
+  transition: transform .18s ease;
+}
+
+.solicitud-more[open] summary i {
+  transform: rotate(180deg);
+}
+
+.solicitud-more-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .24s ease;
+}
+
+.solicitud-more[open] .solicitud-more-body {
+  grid-template-rows: 1fr;
+}
+
+.solicitud-more-inner {
+  overflow: hidden;
+  padding-top: 10px;
+}
+
+.solicitud-logistics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.solicitud-logistics-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.solicitud-logistics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.solicitud-logistic-card {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 70px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-soft);
+}
+
+.solicitud-logistic-card i {
+  color: var(--accent);
+  margin-top: 2px;
+}
+
+.solicitud-logistic-card span,
+.solicitud-map-caption small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.solicitud-logistic-card strong {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.solicitud-logistic-card small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.solicitud-map-card,
+.solicitud-map-fallback,
+.solicitud-note-card {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.solicitud-map-card iframe {
+  display: block;
+  width: 100%;
+  height: 190px;
+  border: 0;
+}
+
+.solicitud-map-caption {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+}
+
+.solicitud-map-caption span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.solicitud-map-fallback {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  color: var(--muted);
+}
+
+.solicitud-map-fallback i {
+  color: var(--accent);
+  font-size: 20px;
+  margin-top: 2px;
+}
+
+.solicitud-map-fallback strong,
+.solicitud-note-card strong {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.solicitud-map-fallback p,
+.solicitud-note-card p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.solicitud-note-card {
+  padding: 11px 12px;
+}
+
 .publish-shell {
   display: grid;
   grid-template-columns: 300px 1fr;
@@ -2437,6 +2667,28 @@ label input:focus, label select:focus, label textarea:focus {
   .form-grid,
   .reservation-grid {
     grid-template-columns: 1fr;
+  }
+
+  .solicitud-logistics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .solicitud-exec-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .solicitud-more summary {
+    width: 100%;
+  }
+
+  .solicitud-logistics-head,
+  .solicitud-map-caption {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .solicitud-map-card iframe {
+    height: 220px;
   }
 
   .theme-options {

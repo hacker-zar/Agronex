@@ -637,19 +637,10 @@ function economicSummaryLines(context, formOrReservation = null) {
   if (context.priceUnit !== "fijo" && context.estimate.quantity) {
     lines.splice(1, 0, ["Cantidad estimada", `${money(context.estimate.quantity)} ${quantityUnitLabel(context.priceUnit)}`]);
   }
-  if (formOrReservation) {
-    const isForm = Boolean(formOrReservation.elements);
-    const origin = formOrReservation.origin || (isForm ? clean(formControl(formOrReservation, "origin")?.value) : "");
-    const destination = formOrReservation.destination || (isForm ? clean(formControl(formOrReservation, "destination")?.value) : "");
-    const field = formOrReservation.field || (isForm ? clean(formControl(formOrReservation, "field")?.value) : "");
-    if (origin) lines.push(["Origen", origin]);
-    if (destination) lines.push(["Destino", destination]);
-    if (!origin && !destination && field) lines.push(["Ubicacion", field]);
-  }
   return lines;
 }
 
-function economicSummaryMarkup(context, title = "Estimacion economica", totalLabel = "Costo estimado", formOrReservation = null) {
+function economicSummaryMarkup(context, title = "Estimacion economica", totalLabel = "Costo estimado", formOrReservation = null, showTotalLine = true) {
   const lines = economicSummaryLines(context, formOrReservation);
   return `
     <section class="economic-summary">
@@ -659,7 +650,7 @@ function economicSummaryMarkup(context, title = "Estimacion economica", totalLab
       </div>
       <div class="economic-summary-grid">
         ${lines.map(([label, value]) => `<div class="economic-summary-line"><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>`).join("")}
-        <div class="economic-summary-line"><span>${escapeHTML(totalLabel)}</span><strong>${formatEstimatedMoney(context?.estimate?.estimatedValue)}</strong></div>
+        ${showTotalLine ? `<div class="economic-summary-line"><span>${escapeHTML(totalLabel)}</span><strong>${formatEstimatedMoney(context?.estimate?.estimatedValue)}</strong></div>` : ""}
       </div>
       <p>El valor mostrado es una estimacion calculada con la informacion disponible.</p>
       <p>El importe final podra variar segun la cantidad efectivamente trabajada, la modalidad de cobro del contratista y las condiciones reales del servicio.</p>
@@ -1360,7 +1351,6 @@ function solicitudLocationSummary(reservation) {
 }
 function solicitudCard(reservation) {
   const urgencyLabel = formatUrgency(reservation.urgency);
-  const economicContext = reservationEconomicContext(reservation);
   return `
     <div class="offer-solicitud-card">
       <div class="offer-solicitud-head">
@@ -1373,7 +1363,7 @@ function solicitudCard(reservation) {
         </div>
         <span class="status-pill status-pending">Pendiente</span>
       </div>
-      ${economicSummaryMarkup(economicContext, "Ingreso estimado", "Total estimado", reservation)}
+      ${solicitudLogisticsPanel(reservation)}
       <div class="offer-solicitud-actions">
         <button class="btn btn-sm danger reject-solicitud-btn" type="button"
           data-id="${reservation.id}" data-title="${escapeHTML(reservation.machineTitle)}">
@@ -1387,6 +1377,218 @@ function solicitudCard(reservation) {
   `;
 }
 
+function solicitudLogisticsPanel(reservation) {
+  const workLocation = reservationWorkLocation(reservation);
+  const route = reservationRouteInfo(reservation, workLocation);
+  const duration = reservationDurationLabel(reservation);
+  const economicContext = reservationEconomicContext(reservation);
+  const map = workLocation ? logisticsMapMarkup(workLocation, reservation) : logisticsMapFallback();
+  const payment = formatEstimatedMoney(economicContext?.estimate?.estimatedValue);
+  return `
+    <section class="solicitud-decision" aria-label="Resumen ejecutivo de la solicitud">
+      <div class="solicitud-exec-grid">
+        ${executiveInfoCard("fa-solid fa-location-dot", "Distancia", route.distanceLabel)}
+        ${executiveInfoCard("fa-regular fa-clock", "Viaje", route.timeLabel)}
+        ${executiveInfoCard("fa-solid fa-coins", "Ganancia estimada", payment)}
+        ${executiveInfoCard("fa-regular fa-calendar", "Fecha", formatDateRange(reservation))}
+        ${executiveInfoCard("fa-solid fa-tractor", "Trabajo", reservationJobLabel(reservation))}
+      </div>
+      <details class="solicitud-more">
+        <summary><span>M&aacute;s informaci&oacute;n</span><i class="fa-solid fa-chevron-down"></i></summary>
+        <div class="solicitud-more-body">
+          <div class="solicitud-more-inner">
+            <div class="solicitud-logistics-head">
+              <span><i class="fa-solid fa-route"></i> Detalle logistico</span>
+              ${route.googleMapsUrl ? `<a class="btn btn-sm ghost" href="${route.googleMapsUrl}" target="_blank" rel="noopener"><i class="fa-solid fa-diamond-turn-right"></i> Ver ruta</a>` : ""}
+            </div>
+            <div class="solicitud-logistics-grid">
+              ${logisticInfoCard("fa-solid fa-location-dot", "Ubicacion", reservationLocationLabel(reservation))}
+              ${duration ? logisticInfoCard("fa-solid fa-hourglass-half", "Duracion estimada", duration) : ""}
+              ${logisticInfoCard("fa-solid fa-calculator", "Cantidad", escapeHTML(reservationQuantityLabel(reservation)))}
+            </div>
+            ${map}
+            ${reservation.accessConditions ? `<div class="solicitud-note-card"><strong>Condiciones de acceso</strong><p>${escapeHTML(reservation.accessConditions)}</p></div>` : ""}
+            ${reservation.notes ? `<div class="solicitud-note-card"><strong>Observaciones</strong><p>${escapeHTML(reservation.notes)}</p></div>` : ""}
+          </div>
+        </div>
+      </details>
+    </section>
+  `;
+}
+
+function executiveInfoCard(icon, label, value) {
+  return `
+    <div class="solicitud-exec-card">
+      <i class="${icon}"></i>
+      <div>
+        <span>${escapeHTML(label)}</span>
+        <strong>${value}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function logisticInfoCard(icon, label, value) {
+  return `
+    <div class="solicitud-logistic-card">
+      <i class="${icon}"></i>
+      <div>
+        <span>${escapeHTML(label)}</span>
+        <strong>${value}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function reservationJobLabel(reservation) {
+  if (reservation.requestMode === "truck" || reservation.category === "Camion") return escapeHTML(reservation.cargoType ? `Distribucion - ${reservation.cargoType}` : "Distribucion");
+  if (reservation.requestMode === "harvest" || reservation.category === "Cosechadora") return escapeHTML(reservation.crop ? `Cosecha - ${reservation.crop}` : "Cosecha");
+  if (reservation.requestMode === "bagger" || reservation.category === "Embolsadora") return escapeHTML(reservation.grainType ? `Embolsado - ${reservation.grainType}` : "Embolsado");
+  return escapeHTML(reservation.job || reservation.serviceType || "Trabajo agricola");
+}
+
+function reservationLocationLabel(reservation) {
+  if (reservation.requestMode === "truck" || reservation.category === "Camion") {
+    return `${escapeHTML(reservation.origin || "Origen a confirmar")}<br><small>Destino: ${escapeHTML(reservation.destination || "a confirmar")}</small>`;
+  }
+  return formatFieldStack(reservation.field || reservation.location?.address || "Ubicacion a confirmar");
+}
+
+function reservationDurationLabel(reservation) {
+  if (reservation.estimatedServiceHours) return `${money(reservation.estimatedServiceHours)} h estimadas`;
+  if (reservation.estimatedDays) return `${money(reservation.estimatedDays)} dia${Number(reservation.estimatedDays) === 1 ? "" : "s"}`;
+  if (reservation.hectares) {
+    const hours = Math.max(1, Math.ceil(Number(reservation.hectares) / 18));
+    return hours <= 8 ? "1 jornada de trabajo" : `${Math.ceil(hours / 8)} jornadas de trabajo`;
+  }
+  return "";
+}
+
+function reservationWorkLocation(reservation) {
+  const direct = reservation.location;
+  if (direct && isValidCoordinate(direct.latitude, direct.longitude)) {
+    return {
+      address: clean(direct.address) || reservation.field || "Ubicacion del trabajo",
+      latitude: Number(direct.latitude),
+      longitude: Number(direct.longitude),
+      approximate: false,
+    };
+  }
+  const approximate = knownCoordinatesForLocation(reservation.field || reservation.destination || reservation.origin);
+  return approximate ? { ...approximate, approximate: true } : null;
+}
+
+function reservationRouteInfo(reservation, workLocation) {
+  const machine = findMachine(reservation.machineId);
+  const contractorLocation = machineLocationCoordinates(machine);
+  const mapsUrl = workLocation ? googleMapsRouteUrl(workLocation, contractorLocation) : "";
+  if (!workLocation) {
+    return {
+      distanceLabel: "No pudimos calcularla todavia.",
+      timeLabel: "Selecciona una ubicacion exacta para estimar el viaje.",
+      googleMapsUrl: mapsUrl,
+    };
+  }
+  if (!contractorLocation) {
+    return {
+      distanceLabel: "No pudimos calcularla todavia.",
+      timeLabel: "Falta la ubicacion precisa del contratista.",
+      googleMapsUrl: mapsUrl,
+    };
+  }
+  const distanceKm = haversineKm(contractorLocation, workLocation);
+  return {
+    distanceLabel: `${formatKm(distanceKm)} km`,
+    timeLabel: estimatedTravelTime(distanceKm),
+    googleMapsUrl: mapsUrl,
+  };
+}
+
+function machineLocationCoordinates(machine) {
+  if (!machine) return null;
+  if (isValidCoordinate(machine.latitude, machine.longitude)) {
+    return { latitude: Number(machine.latitude), longitude: Number(machine.longitude), address: machine.location || machine.title };
+  }
+  return knownCoordinatesForLocation(machine.location);
+}
+
+function knownCoordinatesForLocation(value) {
+  const key = textKey(value);
+  if (!key) return null;
+  const places = [
+    { match: ["venado tuerto"], address: "Venado Tuerto, Santa Fe", latitude: -33.7456, longitude: -61.9688 },
+    { match: ["pergamino"], address: "Pergamino, Buenos Aires", latitude: -33.8895, longitude: -60.5736 },
+    { match: ["junin", "junã­n", "jun n"], address: "Junin, Buenos Aires", latitude: -34.5850, longitude: -60.9589 },
+    { match: ["rojas"], address: "Rojas, Buenos Aires", latitude: -34.1977, longitude: -60.7350 },
+    { match: ["rosario"], address: "Rosario, Santa Fe", latitude: -32.9442, longitude: -60.6505 },
+    { match: ["cordoba", "córdoba", "cã³rdoba"], address: "Cordoba Capital", latitude: -31.4201, longitude: -64.1888 },
+    { match: ["buenos aires"], address: "Buenos Aires", latitude: -34.6037, longitude: -58.3816 },
+  ];
+  const found = places.find((place) => place.match.some((item) => key.includes(item)));
+  return found ? { address: found.address, latitude: found.latitude, longitude: found.longitude } : null;
+}
+
+function haversineKm(origin, destination) {
+  const toRad = (value) => Number(value) * Math.PI / 180;
+  const radiusKm = 6371;
+  const dLat = toRad(destination.latitude - origin.latitude);
+  const dLon = toRad(destination.longitude - origin.longitude);
+  const lat1 = toRad(origin.latitude);
+  const lat2 = toRad(destination.latitude);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return radiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatKm(value) {
+  return Number(value).toLocaleString("es-AR", { maximumFractionDigits: value < 20 ? 1 : 0 });
+}
+
+function estimatedTravelTime(distanceKm) {
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return "No disponible";
+  const minutes = Math.max(10, Math.round((distanceKm / 55) * 60));
+  if (minutes < 60) return `${minutes} min aprox.`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min aprox.` : `${hours} h aprox.`;
+}
+
+function googleMapsRouteUrl(destination, origin = null) {
+  if (!destination || !isValidCoordinate(destination.latitude, destination.longitude)) return "";
+  const params = new URLSearchParams({ api: "1", destination: `${destination.latitude},${destination.longitude}`, travelmode: "driving" });
+  if (origin && isValidCoordinate(origin.latitude, origin.longitude)) params.set("origin", `${origin.latitude},${origin.longitude}`);
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+function logisticsMapMarkup(location, reservation) {
+  const lat = Number(location.latitude);
+  const lon = Number(location.longitude);
+  const delta = 0.018;
+  const bbox = [lon - delta, lat - delta, lon + delta, lat + delta].join("%2C");
+  const marker = `${lat}%2C${lon}`;
+  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${marker}`;
+  const approximate = location.approximate ? "Ubicacion aproximada por texto" : "Ubicacion exacta seleccionada";
+  return `
+    <div class="solicitud-map-card">
+      <iframe title="Mapa de ${escapeHTML(reservation.machineTitle)}" loading="lazy" src="${src}"></iframe>
+      <div class="solicitud-map-caption">
+        <span><i class="fa-solid fa-map-pin"></i> ${escapeHTML(approximate)}</span>
+        <small>${escapeHTML(location.address || formatCoordinates(lat, lon))}</small>
+      </div>
+    </div>
+  `;
+}
+
+function logisticsMapFallback() {
+  return `
+    <div class="solicitud-map-fallback">
+      <i class="fa-solid fa-map-location-dot"></i>
+      <div>
+        <strong>No pudimos mostrar el mapa.</strong>
+        <p>La solicitud necesita una ubicacion exacta para ver el punto y calcular la ruta.</p>
+      </div>
+    </div>
+  `;
+}
 function setOfferStatus(machineId, status) {
   const machine = findMachine(machineId);
   if (!machine) return;
@@ -1495,7 +1697,7 @@ function reservationCard(reservation) {
       <div class="reservation-grid">
         ${reservationMetrics(reservation)}
       </div>
-      ${canResolve ? economicSummaryMarkup(economicContext, "Ingreso estimado", "Total estimado", reservation) : ""}
+      ${canResolve ? solicitudLogisticsPanel(reservation) : ""}
       ${reservationStatusTrack(reservation)}
       ${rescheduleSection(reservation)}
       ${delaySection(reservation)}
@@ -2206,6 +2408,7 @@ function reservationFromForm(form, machine) {
     jobType:      formControl(form, "job").value,
     job:          formControl(form, "job").value,
     notes:        clean(formControl(form, "notes").value),
+    accessConditions: clean(formControl(form, "accessConditions").value),
     requestMode:  mode,
     unitPrice:    Number(machine.price),
     priceUnit,
