@@ -190,6 +190,8 @@ const state = {
     name:     "",
     zone:     "Pergamino, Buenos Aires",
     hectares: "120",
+    baseLocation: "Pergamino, Buenos Aires",
+    operationRadiusKm: 80,
     role:     "Productor y contratista",
     bio:      "",
   }),
@@ -198,7 +200,7 @@ const state = {
 
 // Pending confirm action
 let pendingAction = null;
-const locationPickerState = { map: null, marker: null, form: null, selected: null };
+const locationPickerState = { map: null, marker: null, form: null, selected: null, operationCircle: null, operationCenterMarker: null, operationCenter: null };
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -782,14 +784,21 @@ function resetPublishWizard() {
 /* ─── PROFILE ─── */
 function bindProfile() {
   const form = $("#profile-form");
-  form.elements.name.value     = state.profile.name || "";
-  form.elements.zone.value     = state.profile.zone || "";
+  form.elements.name.value = state.profile.name || "";
+  form.elements.zone.value = state.profile.zone || "";
+  form.elements.baseLocation.value = state.profile.baseLocation || state.profile.zone || "";
   formControl(form, "hectares").value = state.profile.hectares || "";
-  form.elements.bio.value      = state.profile.bio || "";
+  formControl(form, "operationRadiusKm").value = profileOperationRadiusKm();
+  updateOperationRadiusValue();
+  form.elements.bio.value = state.profile.bio || "";
 
-  form.addEventListener("input", () => {
+  form.addEventListener("input", (event) => {
     state.profile = profileFromForm();
+    if (["baseLocation", "zone"].includes(event.target?.name)) locationPickerState.operationCenter = profileBaseLocation();
+    updateOperationRadiusValue();
     renderProfile();
+    updateOperationCircle();
+    updateLocationSelectionUI(locationPickerState.selected);
   });
 
   form.addEventListener("submit", (e) => {
@@ -797,6 +806,7 @@ function bindProfile() {
     state.profile = profileFromForm();
     saveProfile();
     renderProfile();
+    updateOperationCircle();
     showToast("Perfil guardado.");
   });
 
@@ -820,12 +830,36 @@ function bindProfile() {
 function profileFromForm() {
   const form = $("#profile-form");
   return {
-    name:     clean(form.elements.name.value),
-    zone:     clean(form.elements.zone.value),
+    name: clean(form.elements.name.value),
+    zone: clean(form.elements.zone.value),
     hectares: clean(formControl(form, "hectares").value),
-    role:     state.profile.role || clean(state.auth?.role) || "Productor y contratista",
-    bio:      clean(form.elements.bio.value),
+    baseLocation: clean(form.elements.baseLocation.value),
+    operationRadiusKm: profileOperationRadiusKm(formControl(form, "operationRadiusKm").value),
+    role: state.profile.role || clean(state.auth?.role) || "Productor y contratista",
+    bio: clean(form.elements.bio.value),
   };
+}
+
+function profileOperationRadiusKm(value = state.profile.operationRadiusKm) {
+  const radius = Number(value);
+  if (!Number.isFinite(radius)) return 80;
+  return Math.min(500, Math.max(10, Math.round(radius)));
+}
+
+function updateOperationRadiusValue() {
+  const label = $("#operation-radius-value");
+  if (label) label.textContent = `${profileOperationRadiusKm()} km`;
+}
+
+function profileBaseLocation() {
+  if (isValidCoordinate(state.profile.baseLatitude, state.profile.baseLongitude)) {
+    return {
+      latitude: Number(state.profile.baseLatitude),
+      longitude: Number(state.profile.baseLongitude),
+      address: clean(state.profile.baseLocation) || clean(state.profile.zone) || "Ubicacion base",
+    };
+  }
+  return knownCoordinatesForLocation(state.profile.baseLocation || state.profile.zone);
 }
 
 function normalizeTheme(value) {
@@ -977,6 +1011,7 @@ function renderProfile() {
   $("#profile-role-label").textContent = role;
   $("#profile-zone-label").textContent = clean(state.profile.zone) || "Zona sin cargar";
   $("#profile-hectares-label").textContent = state.profile.hectares ? `${money(state.profile.hectares)} ha` : "Sin cargar";
+  $("#profile-radius-label") && ($("#profile-radius-label").textContent = `${profileOperationRadiusKm()} km`);
   $("#profile-role-value").textContent = role;
   // User chip
   $("#user-chip-avatar").textContent = state.auth ? initials : "ND";
@@ -1350,16 +1385,12 @@ function solicitudLocationSummary(reservation) {
   return escapeHTML(reservation.field || "Ubicacion a confirmar");
 }
 function solicitudCard(reservation) {
-  const urgencyLabel = formatUrgency(reservation.urgency);
   return `
     <div class="offer-solicitud-card">
       <div class="offer-solicitud-head">
         <div>
           <div class="offer-solicitud-title">${escapeHTML(reservation.machineTitle)}</div>
-          <div class="offer-solicitud-meta">
-            ${solicitudSummary(reservation)}
-          </div>
-          <div class="offer-solicitud-meta">${solicitudLocationSummary(reservation)}${urgencyLabel ? ` - Urgencia ${urgencyLabel}` : ""}</div>
+          <div class="offer-solicitud-meta">Solicitud ${formatDate(reservation.createdAt)} - ID: ${reservationCode(reservation)}</div>
         </div>
         <span class="status-pill status-pending">Pendiente</span>
       </div>
@@ -1381,15 +1412,16 @@ function solicitudLogisticsPanel(reservation) {
   const workLocation = reservationWorkLocation(reservation);
   const route = reservationRouteInfo(reservation, workLocation);
   const duration = reservationDurationLabel(reservation);
+  const totalTime = reservationTotalTimeLabel(route, reservation);
   const economicContext = reservationEconomicContext(reservation);
   const map = workLocation ? logisticsMapMarkup(workLocation, reservation) : logisticsMapFallback();
   const payment = formatEstimatedMoney(economicContext?.estimate?.estimatedValue);
   return `
     <section class="solicitud-decision" aria-label="Resumen ejecutivo de la solicitud">
       <div class="solicitud-exec-grid">
+        ${executiveInfoCard("fa-solid fa-coins", "Ingreso", payment)}
         ${executiveInfoCard("fa-solid fa-location-dot", "Distancia", route.distanceLabel)}
-        ${executiveInfoCard("fa-regular fa-clock", "Viaje", route.timeLabel)}
-        ${executiveInfoCard("fa-solid fa-coins", "Ganancia estimada", payment)}
+        ${executiveInfoCard("fa-regular fa-clock", "Tiempo", totalTime)}
         ${executiveInfoCard("fa-regular fa-calendar", "Fecha", formatDateRange(reservation))}
         ${executiveInfoCard("fa-solid fa-tractor", "Trabajo", reservationJobLabel(reservation))}
       </div>
@@ -1402,8 +1434,10 @@ function solicitudLogisticsPanel(reservation) {
               ${route.googleMapsUrl ? `<a class="btn btn-sm ghost" href="${route.googleMapsUrl}" target="_blank" rel="noopener"><i class="fa-solid fa-diamond-turn-right"></i> Ver ruta</a>` : ""}
             </div>
             <div class="solicitud-logistics-grid">
+              ${logisticInfoCard("fa-solid fa-user", "Cuenta solicitante", reservationRequesterLabel(reservation))}
               ${logisticInfoCard("fa-solid fa-location-dot", "Ubicacion", reservationLocationLabel(reservation))}
-              ${duration ? logisticInfoCard("fa-solid fa-hourglass-half", "Duracion estimada", duration) : ""}
+              ${logisticInfoCard("fa-regular fa-clock", "Tiempo de viaje", route.timeLabel)}
+              ${duration ? logisticInfoCard("fa-solid fa-hourglass-half", "Tiempo de trabajo", duration) : ""}
               ${logisticInfoCard("fa-solid fa-calculator", "Cantidad", escapeHTML(reservationQuantityLabel(reservation)))}
             </div>
             ${map}
@@ -1455,13 +1489,42 @@ function reservationLocationLabel(reservation) {
 }
 
 function reservationDurationLabel(reservation) {
-  if (reservation.estimatedServiceHours) return `${money(reservation.estimatedServiceHours)} h estimadas`;
+  const minutes = reservationWorkMinutes(reservation);
+  if (!minutes) return "";
   if (reservation.estimatedDays) return `${money(reservation.estimatedDays)} dia${Number(reservation.estimatedDays) === 1 ? "" : "s"}`;
-  if (reservation.hectares) {
-    const hours = Math.max(1, Math.ceil(Number(reservation.hectares) / 18));
-    return hours <= 8 ? "1 jornada de trabajo" : `${Math.ceil(hours / 8)} jornadas de trabajo`;
+  if (reservation.hectares && minutes >= 480) {
+    const days = Math.ceil(minutes / 480);
+    return days === 1 ? "1 jornada de trabajo" : `${days} jornadas de trabajo`;
   }
-  return "";
+  return formatDurationMinutes(minutes);
+}
+
+function reservationWorkMinutes(reservation) {
+  if (reservation.estimatedServiceHours) return Math.max(1, Math.round(Number(reservation.estimatedServiceHours) * 60));
+  if (reservation.estimatedDays) return Math.max(1, Math.round(Number(reservation.estimatedDays) * 480));
+  if (reservation.hectares) return Math.max(60, Math.ceil(Number(reservation.hectares) / 18) * 60);
+  return null;
+}
+
+function reservationTotalTimeLabel(route, reservation) {
+  const travel = Number(route.travelMinutes || 0);
+  const work = Number(reservationWorkMinutes(reservation) || 0);
+  if (travel > 0 && work > 0) return `${formatDurationMinutes(travel + work)} aprox.`;
+  if (travel > 0) return `${formatDurationMinutes(travel)} de viaje aprox.`;
+  if (work > 0) return `${formatDurationMinutes(work)} de trabajo aprox.`;
+  return "No disponible";
+}
+
+function formatDurationMinutes(minutes) {
+  const total = Math.max(1, Math.round(Number(minutes)));
+  if (total < 60) return `${total} min`;
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+function reservationRequesterLabel(reservation) {
+  return escapeHTML(clean(reservation.requestedByName) || clean(reservation.requestedBy) || "Productor sin identificar");
 }
 
 function reservationWorkLocation(reservation) {
@@ -1487,6 +1550,7 @@ function reservationRouteInfo(reservation, workLocation) {
       distanceLabel: "No pudimos calcularla todavia.",
       timeLabel: "Selecciona una ubicacion exacta para estimar el viaje.",
       googleMapsUrl: mapsUrl,
+      travelMinutes: null,
     };
   }
   if (!contractorLocation) {
@@ -1494,13 +1558,16 @@ function reservationRouteInfo(reservation, workLocation) {
       distanceLabel: "No pudimos calcularla todavia.",
       timeLabel: "Falta la ubicacion precisa del contratista.",
       googleMapsUrl: mapsUrl,
+      travelMinutes: null,
     };
   }
   const distanceKm = haversineKm(contractorLocation, workLocation);
+  const travelMinutes = estimatedTravelMinutes(distanceKm);
   return {
     distanceLabel: `${formatKm(distanceKm)} km`,
-    timeLabel: estimatedTravelTime(distanceKm),
+    timeLabel: `${formatDurationMinutes(travelMinutes)} aprox.`,
     googleMapsUrl: mapsUrl,
+    travelMinutes,
   };
 }
 
@@ -1543,13 +1610,9 @@ function formatKm(value) {
   return Number(value).toLocaleString("es-AR", { maximumFractionDigits: value < 20 ? 1 : 0 });
 }
 
-function estimatedTravelTime(distanceKm) {
-  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return "No disponible";
-  const minutes = Math.max(10, Math.round((distanceKm / 55) * 60));
-  if (minutes < 60) return `${minutes} min aprox.`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours} h ${rest} min aprox.` : `${hours} h aprox.`;
+function estimatedTravelMinutes(distanceKm) {
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return null;
+  return Math.max(10, Math.round((distanceKm / 55) * 60));
 }
 
 function googleMapsRouteUrl(destination, origin = null) {
@@ -1694,9 +1757,11 @@ function reservationCard(reservation) {
           </button>
         </div>
       </div>
-      <div class="reservation-grid">
-        ${reservationMetrics(reservation)}
-      </div>
+      ${canResolve ? "" : `
+        <div class="reservation-grid">
+          ${reservationMetrics(reservation)}
+        </div>
+      `}
       ${canResolve ? solicitudLogisticsPanel(reservation) : ""}
       ${reservationStatusTrack(reservation)}
       ${rescheduleSection(reservation)}
@@ -2409,6 +2474,8 @@ function reservationFromForm(form, machine) {
     job:          formControl(form, "job").value,
     notes:        clean(formControl(form, "notes").value),
     accessConditions: clean(formControl(form, "accessConditions").value),
+    requestedBy:   currentUserId(),
+    requestedByName: currentUserLabel(),
     requestMode:  mode,
     unitPrice:    Number(machine.price),
     priceUnit,
@@ -2542,9 +2609,11 @@ function openLocationPicker(form) {
     return;
   }
 
+  locationPickerState.operationCenter = profileBaseLocation();
+  updateOperationCircle();
   const current = locationPickerState.selected;
-  const center = current ? [current.latitude, current.longitude] : [-34.6037, -58.3816];
-  locationPickerState.map.setView(center, current ? 15 : 6);
+  const center = current ? [current.latitude, current.longitude] : (locationPickerState.operationCenter ? [locationPickerState.operationCenter.latitude, locationPickerState.operationCenter.longitude] : [-34.6037, -58.3816]);
+  locationPickerState.map.setView(center, current ? 15 : (locationPickerState.operationCenter ? 9 : 6));
   if (current) {
     setLocationSelection(current.latitude, current.longitude, current.address, false, { pan: false, updateSearch: true });
   } else {
@@ -2586,8 +2655,10 @@ function retryLocationMap() {
     setLocationMapUnavailable(true);
     return;
   }
+  updateOperationCircle();
   const current = locationPickerState.selected;
-  locationPickerState.map.setView(current ? [current.latitude, current.longitude] : [-34.6037, -58.3816], current ? 15 : 6);
+  const base = locationPickerState.operationCenter || profileBaseLocation();
+  locationPickerState.map.setView(current ? [current.latitude, current.longitude] : (base ? [base.latitude, base.longitude] : [-34.6037, -58.3816]), current ? 15 : (base ? 9 : 6));
   if (current) setLocationSelection(current.latitude, current.longitude, current.address, false, { pan: false, updateSearch: true });
   setTimeout(() => locationPickerState.map?.invalidateSize(), 80);
 }
@@ -2639,13 +2710,77 @@ function setLocationSelection(latitude, longitude, address = "Ubicacion seleccio
 
 function updateLocationSelectionUI(location, updateSearch = true) {
   const hasLocation = Boolean(location && isValidCoordinate(location.latitude, location.longitude));
-  $("#location-selected-address").textContent = hasLocation ? location.address : "Sin ubicacion seleccionada";
+  const info = $("#location-selected-info");
+  if (info) info.innerHTML = hasLocation ? locationRadiusInfoMarkup(location) : '<strong id="location-selected-address">Sin ubicacion seleccionada</strong>';
   $("#location-selected-lat").textContent = hasLocation ? Number(location.latitude).toFixed(6) : "-";
   $("#location-selected-lon").textContent = hasLocation ? Number(location.longitude).toFixed(6) : "-";
   $("#location-manual-lat").value = hasLocation ? Number(location.latitude).toFixed(6) : "";
   $("#location-manual-lon").value = hasLocation ? Number(location.longitude).toFixed(6) : "";
   if (updateSearch) $("#location-search-input").value = hasLocation ? location.address : "";
   updateLocationConfirmState();
+}
+
+function updateOperationCircle(center = locationPickerState.operationCenter || profileBaseLocation()) {
+  if (!locationPickerState.map || !window.L) return;
+  if (locationPickerState.operationCircle) {
+    locationPickerState.operationCircle.remove();
+    locationPickerState.operationCircle = null;
+  }
+  if (locationPickerState.operationCenterMarker) {
+    locationPickerState.operationCenterMarker.remove();
+    locationPickerState.operationCenterMarker = null;
+  }
+  if (!center || !isValidCoordinate(center.latitude, center.longitude)) return;
+  locationPickerState.operationCenter = center;
+  const latLng = [Number(center.latitude), Number(center.longitude)];
+  locationPickerState.operationCircle = L.circle(latLng, {
+    radius: profileOperationRadiusKm() * 1000,
+    color: "#38761d",
+    weight: 2,
+    fillColor: "#22C55E",
+    fillOpacity: 0.12,
+    interactive: false,
+  }).addTo(locationPickerState.map);
+  locationPickerState.operationCenterMarker = L.circleMarker(latLng, {
+    radius: 5,
+    color: "#1f5f13",
+    weight: 2,
+    fillColor: "#ffffff",
+    fillOpacity: 1,
+    interactive: false,
+  }).addTo(locationPickerState.map);
+}
+
+function locationRadiusInfoMarkup(location) {
+  const info = locationRadiusInfo(location);
+  if (!info) {
+    return `<strong id="location-selected-address">${escapeHTML(location.address || "Ubicacion seleccionada")}</strong>`;
+  }
+  return `
+    <strong id="location-selected-address">${escapeHTML(location.address || "Ubicacion seleccionada")}</strong>
+    <div class="location-radius-card ${info.inside ? "inside" : "outside"}">
+      <span><i class="fa-solid fa-route"></i> Distancia: <strong>${info.distanceLabel}</strong></span>
+      <span><i class="fa-solid ${info.inside ? "fa-circle-check" : "fa-circle-exclamation"}"></i> ${info.statusLabel}</span>
+      ${info.inside ? "" : `<span>Radio configurado: <strong>${info.radiusLabel}</strong></span>`}
+      <span><i class="fa-regular fa-clock"></i> Tiempo estimado: <strong>${info.timeLabel}</strong></span>
+    </div>
+  `;
+}
+
+function locationRadiusInfo(location) {
+  const center = locationPickerState.operationCenter || profileBaseLocation();
+  if (!center || !location || !isValidCoordinate(center.latitude, center.longitude) || !isValidCoordinate(location.latitude, location.longitude)) return null;
+  const distance = haversineKm(center, location);
+  const radius = profileOperationRadiusKm();
+  const inside = distance <= radius;
+  const travelMinutes = estimatedTravelMinutes(distance);
+  return {
+    inside,
+    distanceLabel: `${formatKm(distance)} km`,
+    radiusLabel: `${radius} km`,
+    timeLabel: travelMinutes ? `${formatDurationMinutes(travelMinutes)} aprox.` : "No disponible",
+    statusLabel: inside ? "Dentro de tu radio de operacion" : "Fuera de tu radio de operacion",
+  };
 }
 
 function updateLocationConfirmState() {
@@ -2772,6 +2907,8 @@ function useCurrentLocation() {
   setLocationPickerStatus("Solicitando ubicacion actual...");
   navigator.geolocation.getCurrentPosition((position) => {
     const { latitude, longitude } = position.coords;
+    locationPickerState.operationCenter = { latitude, longitude, address: "Mi ubicacion actual" };
+    updateOperationCircle();
     if (locationPickerState.map) locationPickerState.map.setView([latitude, longitude], 15);
     setLocationSelection(latitude, longitude, formatCoordinates(latitude, longitude), true, { pan: false, updateSearch: true });
   }, () => {
