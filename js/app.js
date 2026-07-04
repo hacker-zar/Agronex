@@ -305,11 +305,7 @@ function bindNavigation() {
     clearCatalogFilters();
   });
   $("#user-chip").addEventListener("click", () => {
-    if (!state.auth) {
-      showScreen("acceso");
-      return;
-    }
-    openPublicProfileModal(publicProfileForProducer(currentUserLabel()));
+    showScreen(state.auth ? "perfil" : "acceso");
   });
 }
 
@@ -1296,11 +1292,11 @@ function renderProfile() {
   $("#profile-radius-label") && ($("#profile-radius-label").textContent = `${profileOperationRadiusKm()} km`);
   [$("#profile-avatar"), $("#profile-name-label")].forEach((el) => {
     if (!el) return;
-    el.classList.add("public-profile-trigger");
-    el.dataset.profileType = "producer";
-    el.dataset.profileName = name;
-    el.tabIndex = 0;
-    el.setAttribute("role", "button");
+    el.classList.remove("public-profile-trigger");
+    delete el.dataset.profileType;
+    delete el.dataset.profileName;
+    el.removeAttribute("tabindex");
+    el.removeAttribute("role");
   });
   // User chip
   $("#user-chip-avatar").textContent = state.auth ? initials : "ND";
