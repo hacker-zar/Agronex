@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   reservations: "nexudrive_mvp_reservations",
   reschedules: "nexudrive_mvp_reschedules",
   delays: "nexudrive_mvp_delays",
+  reviews: "nexudrive_mvp_reviews",
   availabilitySlots: "nexudrive_mvp_availability_slots",
   notifications: "nexudrive_mvp_notifications",
   auth: "nexudrive_mvp_auth",
@@ -164,6 +165,21 @@ const priceUnitsByCategory = {
   Otros: ["hectarea", "tonelada", "viaje", "hora", "dia", "bolsa", "fijo"],
   default: ["hectarea", "tonelada", "viaje", "hora", "dia", "bolsa", "fijo"],
 };
+const reviewCategoriesByRole = {
+  producer: [
+    ["punctuality", "Puntualidad"],
+    ["communication", "Comunicacion"],
+    ["vehicleCondition", "Estado del vehiculo"],
+    ["workCompliance", "Cumplimiento del trabajo"],
+  ],
+  contractor: [
+    ["requestClarity", "Claridad del pedido"],
+    ["loadPunctuality", "Puntualidad para carga y descarga"],
+    ["coordination", "Coordinacion"],
+    ["paymentCompliance", "Cumplimiento del pago"],
+  ],
+};
+
 const defaultPriceUnitByCategory = {
   Tractor: "hectarea",
   Sembradora: "hectarea",
@@ -186,10 +202,13 @@ const seedPricingCorrections = {
 
 const statusLabels = {
   pending:  "Pendiente",
+  schedule_counter: "Esperando respuesta del productor",
+  original_kept: "Productor mantiene horario original",
   accepted: "Aceptada",
   working:  "En curso",
   done:     "Finalizada",
   rejected: "Rechazada",
+  cancelled: "Cancelada",
 };
 
 const offerStatusLabels = {
@@ -215,6 +234,7 @@ const state = {
   reservations: readJSON(STORAGE_KEYS.reservations, []),
   rescheduleRequests: readJSON(STORAGE_KEYS.reschedules, []),
   delayRecords: readJSON(STORAGE_KEYS.delays, []),
+  reviews: readJSON(STORAGE_KEYS.reviews, []),
   availabilitySlots: readJSON(STORAGE_KEYS.availabilitySlots, []),
   notifications: readJSON(STORAGE_KEYS.notifications, []),
   auth:         readObject(STORAGE_KEYS.auth, null),
@@ -253,14 +273,18 @@ function init() {
   bindTermsModal();
   bindPublicProfileModal();
   bindNotificationCenter();
+  bindContactModal();
   bindPresenceTracking();
   registerNotificationServiceWorker();
   bindConfirmModal();
   bindReportModal();
   bindRescheduleModal();
+  bindScheduleCounterModal();
   bindDelayModal();
+  bindReviewModal();
   bindLocationPicker();
   bindOffersTabs();
+  syncMachineRatingsFromReviews();
   render();
   persistMachinePricingMigration();
   openLocationDemoFromQuery();
@@ -441,8 +465,7 @@ function bindForms() {
   });
 
   formControl(requestForm, "job").addEventListener("change", () => toggleJobOther(requestForm));
-  formControl(requestForm, "date").addEventListener("change", () => syncRequestDateRange(requestForm));
-  formControl(requestForm, "dateFlexible").addEventListener("change", () => syncRequestDateRange(requestForm));
+  formControl(requestForm, "date").addEventListener("change", () => syncRequestDateRange(requestForm));
   formControl(requestForm, "hectares").addEventListener("input", () => updateRequestEstimate(requestForm));
   ["estimatedTons", "estimatedBags", "estimatedTrips", "estimatedKm", "estimatedServiceHours", "estimatedDays", "origin", "destination"].forEach((name) => {
     formControl(requestForm, name)?.addEventListener("input", () => updateRequestEstimate(requestForm));
@@ -1017,6 +1040,8 @@ function openPublicProfileModal(profile) {
   $("#public-profile-name").textContent = profile.name;
   $("#public-profile-meta").textContent = `${profile.location} - Miembro desde ${profile.memberSince}`;
   renderPublicProfileReputation(profile);
+  renderPublicProfileComments(profile);
+  renderPublicProfileBadges(profile);
   renderChipList("#public-profile-specialties", profile.specialties);
   $("#public-profile-experience").textContent = profile.experience;
   const machinesSection = $("#public-profile-machines-section");
@@ -1038,15 +1063,38 @@ function closePublicProfileModal() {
 function renderPublicProfileReputation(profile) {
   const stats = $("#public-profile-stats");
   const empty = $("#public-profile-reputation-empty");
-  const hasReputation = profile.stats.some((item) => item.value);
+  const visibleStats = (profile.stats || []).filter((item) => item.value);
+  const hasReputation = visibleStats.length > 0;
   empty.hidden = hasReputation;
   stats.hidden = !hasReputation;
-  stats.innerHTML = hasReputation ? profile.stats.map((item) => `
+  stats.innerHTML = hasReputation ? visibleStats.map((item) => `
     <div class="public-profile-stat">
       <span>${item.label}</span>
       <strong>${item.value}</strong>
     </div>
   `).join("") : "";
+}
+function renderPublicProfileComments(profile) {
+  const section = $("#public-profile-comments-section");
+  const target = $("#public-profile-comments");
+  if (!section || !target) return;
+  const comments = profile.recentComments || [];
+  section.hidden = comments.length === 0;
+  target.innerHTML = comments.map((item) => `
+    <div class="public-profile-comment">
+      <span>${Number(item.overallRating).toFixed(1)}/5 - ${formatDate(item.createdAt)}</span>
+      <p>${escapeHTML(item.comment)}</p>
+    </div>
+  `).join("");
+}
+
+function renderPublicProfileBadges(profile) {
+  const section = $("#public-profile-badges-section");
+  const target = $("#public-profile-badges");
+  if (!section || !target) return;
+  const badges = profile.badges || [];
+  section.hidden = badges.length === 0;
+  target.innerHTML = badges.map((item) => `<span class="profile-chip">${escapeHTML(item)}</span>`).join("");
 }
 
 function renderChipList(selector, items) {
@@ -1069,8 +1117,6 @@ function profilePublicationItem(item) {
 function publicProfileForContractor(machine, fallbackName = "") {
   const owner = clean(machine?.owner) || clean(fallbackName) || "Contratista Agronex";
   const machines = state.machines.filter((item) => clean(item.owner) === owner);
-  const completed = state.reservations.filter((item) => clean(item.owner) === owner && item.status === "done").length;
-  const cancellations = state.reservations.filter((item) => clean(item.owner) === owner && item.status === "rejected").length;
   const categories = uniqueList(machines.map((item) => item.category));
   const specialties = uniqueList(machines.map((item) => defaultJobByCategory[item.category]).filter(Boolean));
   const mainMachine = machine || machines[0];
@@ -1080,24 +1126,18 @@ function publicProfileForContractor(machine, fallbackName = "") {
     name: owner,
     location: clean(mainMachine?.location) || "Zona no informada",
     memberSince: memberSinceFor(owner),
-    stats: [
-      { label: "Calificacion", value: typeof mainMachine?.rating === "number" ? `${mainMachine.rating.toFixed(1)}/5` : "" },
-      { label: "Trabajos completados", value: completed ? String(completed) : "" },
-      { label: "Respuesta promedio", value: responseTimeFor(owner) },
-      { label: "Cancelaciones", value: cancellations ? String(cancellations) : "" },
-    ],
+    stats: reputationStatsForProfile("contractor", owner),
+    recentComments: recentReviewCommentsForProfile("contractor", owner),
+    badges: reputationBadgesForProfile("contractor", owner),
     specialties: specialties.length ? specialties : categories,
-    experience: clean(mainMachine?.description) || `${owner} ofrece servicios rurales y maquinaria agricola en ${clean(mainMachine?.location) || "su zona de trabajo"}.`,
+    experience: clean(mainMachine?.description) || owner + " ofrece servicios rurales y maquinaria agricola en " + (clean(mainMachine?.location) || "su zona de trabajo") + ".",
     machines: categories,
-    publications: machines.map((item) => ({ title: item.title, meta: `${item.category} - ${priceDisplay(item)}` })),
+    publications: machines.map((item) => ({ title: item.title, meta: item.category + " - " + priceDisplay(item) })),
   };
 }
-
 function publicProfileForProducer(name = "") {
   const producer = clean(name) || currentUserLabel();
   const requests = state.reservations.filter((item) => clean(item.requestedByName || item.requestedBy) === producer || (!name && item.requestedBy === currentUserId()));
-  const completed = requests.filter((item) => item.status === "done").length;
-  const cancellations = requests.filter((item) => item.status === "rejected").length;
   const specialties = uniqueList(requests.map((item) => item.job || item.serviceType || defaultJobByCategory[item.category]).filter(Boolean));
   return {
     kind: "producer",
@@ -1105,19 +1145,15 @@ function publicProfileForProducer(name = "") {
     name: producer,
     location: clean(state.profile.zone) || "Zona no informada",
     memberSince: memberSinceFor(producer),
-    stats: [
-      { label: "Calificacion", value: "" },
-      { label: "Trabajos completados", value: completed ? String(completed) : "" },
-      { label: "Respuesta promedio", value: requests.length ? "24 h aprox." : "" },
-      { label: "Cancelaciones", value: cancellations ? String(cancellations) : "" },
-    ],
+    stats: reputationStatsForProfile("producer", producer),
+    recentComments: recentReviewCommentsForProfile("producer", producer),
+    badges: reputationBadgesForProfile("producer", producer),
     specialties: specialties.length ? specialties : ["Siembra", "Cosecha", "Transporte"],
-    experience: clean(state.profile.bio) || `${producer} utiliza Agronex para coordinar trabajos agricolas y maquinaria en su zona.`,
+    experience: clean(state.profile.bio) || producer + " utiliza Agronex para coordinar trabajos agricolas y maquinaria en su zona.",
     machines: [],
-    publications: requests.map((item) => ({ title: item.machineTitle, meta: `${reservationJobLabel(item).replace(/<[^>]*>/g, "")} - ${formatDateRange(item)}` })),
+    publications: requests.map((item) => ({ title: item.machineTitle, meta: reservationJobLabel(item).replace(/<[^>]*>/g, "") + " - " + formatDateRange(item) })),
   };
 }
-
 function initialsFor(name) {
   return clean(name).split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase() || "AG";
 }
@@ -1512,7 +1548,7 @@ function renderMisOfertas() {
   const inactivas  = myMachines.filter((m) => m.offerStatus === "inactive");
 
   // Solicitudes = reservations pending (that can be resolved as contractor)
-  const solicitudes = state.reservations.filter((r) => r.status === "pending");
+  const solicitudes = state.reservations.filter(isContractorNegotiationStatus);
 
   $("#tab-count-activas").textContent    = activas.length;
   $("#tab-count-pausadas").textContent   = pausadas.length;
@@ -1549,9 +1585,14 @@ function renderMisOfertas() {
     if (solicitudes.length === 0) {
       list.innerHTML = "";
     } else {
-      // Bind accept/reject buttons
       $$(".accept-solicitud-btn").forEach((btn) =>
-        btn.addEventListener("click", () => setReservationStatus(btn.dataset.id, "accepted")));
+        btn.addEventListener("click", () => acceptNegotiatedSchedule(btn.dataset.id)));
+      $$(".open-schedule-counter-btn").forEach((btn) =>
+        btn.addEventListener("click", () => openScheduleCounterModal(btn.dataset.id)));
+      $$(".accept-reschedule-btn").forEach((btn) =>
+        btn.addEventListener("click", () => acceptRescheduleRequest(btn.dataset.rescheduleId)));
+      $$(".reject-reschedule-btn").forEach((btn) =>
+        btn.addEventListener("click", () => rejectRescheduleRequest(btn.dataset.rescheduleId)));
       $$(".reject-solicitud-btn").forEach((btn) =>
         btn.addEventListener("click", () => confirmAction(
           "Rechazar solicitud",
@@ -1667,18 +1708,33 @@ function solicitudCard(reservation) {
           <div class="offer-solicitud-title">${escapeHTML(reservation.machineTitle)}</div>
           <div class="offer-solicitud-meta">Solicitud ${formatDate(reservation.createdAt)} - ID: ${reservationCode(reservation)}</div>
         </div>
-        <span class="status-pill status-pending">Pendiente</span>
+        <span class="status-pill status-${reservation.status}">${escapeHTML(statusLabels[reservation.status] || reservation.status)}</span>
       </div>
       ${solicitudLogisticsPanel(reservation)}
-      <div class="offer-solicitud-actions">
-        <button class="btn btn-sm danger reject-solicitud-btn" type="button"
-          data-id="${reservation.id}" data-title="${escapeHTML(reservation.machineTitle)}">
-          <i class="fa-solid fa-xmark"></i> Rechazar
-        </button>
-        <button class="btn btn-sm primary accept-solicitud-btn" type="button" data-id="${reservation.id}">
-          <i class="fa-solid fa-check"></i> Aceptar
-        </button>
-      </div>
+      ${scheduleNegotiationSection(reservation, "contractor")}
+      ${rescheduleSection(reservation, "contractor")}
+      ${contractorScheduleActions(reservation)}
+    </div>
+  `;
+}
+
+function contractorScheduleActions(reservation) {
+  if (reservation.status === "schedule_counter") {
+    return `<p class="reservation-rejected neutral"><i class="fa-regular fa-clock"></i> Esperando respuesta del productor.</p>`;
+  }
+  if (!["pending", "original_kept"].includes(reservation.status)) return "";
+  return `
+    <div class="offer-solicitud-actions">
+      <button class="btn btn-sm danger reject-solicitud-btn" type="button"
+        data-id="${reservation.id}" data-title="${escapeHTML(reservation.machineTitle)}">
+        <i class="fa-solid fa-xmark"></i> Rechazar
+      </button>
+      <button class="btn btn-sm ghost open-schedule-counter-btn" type="button" data-id="${reservation.id}">
+        <i class="fa-regular fa-clock"></i> Proponer otro horario
+      </button>
+      <button class="btn btn-sm primary accept-solicitud-btn" type="button" data-id="${reservation.id}">
+        <i class="fa-solid fa-check"></i> Aceptar
+      </button>
     </div>
   `;
 }
@@ -1954,7 +2010,11 @@ function logisticsMapFallback() {
   `;
 }
 function pendingRequestsForMachine(machineId) {
-  return state.reservations.filter((r) => r.machineId === machineId && r.status === "pending");
+  return state.reservations.filter((r) => r.machineId === machineId && isContractorNegotiationStatus(r));
+}
+
+function isContractorNegotiationStatus(reservation) {
+  return ["pending", "schedule_counter", "original_kept"].includes(reservation?.status) || Boolean(pendingRescheduleFor(reservation?.id));
 }
 
 function hasPendingRequestsForMachine(machineId) {
@@ -2024,20 +2084,27 @@ function renderReservations() {
   $$(".accept-reschedule-btn").forEach((btn) => btn.addEventListener("click", () => acceptRescheduleRequest(btn.dataset.rescheduleId)));
   $$(".reject-reschedule-btn").forEach((btn) => btn.addEventListener("click", () => rejectRescheduleRequest(btn.dataset.rescheduleId)));
   $$(".open-delay-btn").forEach((btn) => btn.addEventListener("click", () => openDelayModal(btn.dataset.reservationId)));
+  $$(".accept-schedule-counter-btn").forEach((btn) => btn.addEventListener("click", () => acceptScheduleCounter(btn.dataset.reservationId)));
+  $$(".keep-original-schedule-btn").forEach((btn) => btn.addEventListener("click", () => keepOriginalSchedule(btn.dataset.reservationId)));
+  $$(".cancel-schedule-request-btn").forEach((btn) => btn.addEventListener("click", () => cancelScheduleRequest(btn.dataset.reservationId)));
+  $$(".open-review-btn").forEach((btn) => btn.addEventListener("click", () => openReviewModal(btn.dataset.reservationId, btn.dataset.reviewerRole)));
 }
 
 function reservationCard(reservation) {
   const canResolve    = reservation.status === "pending";
   const canStartWork  = reservation.status === "accepted";
   const canFinishWork = reservation.status === "working";
-  const canDeleteFinished = reservation.status === "done" || reservation.status === "rejected";
+  const canDeleteFinished = ["done", "rejected", "cancelled"].includes(reservation.status);
+  const canReviewContractor = reservation.status === "done" && !reviewForReservation(reservation.id, "producer");
+  const canReviewProducer = reservation.status === "done" && !reviewForReservation(reservation.id, "contractor");
+  const canRespondScheduleCounter = reservation.status === "schedule_counter";
   const canRequestReschedule = ["accepted", "working"].includes(reservation.status) && !pendingRescheduleFor(reservation.id);
   const canReportDelay = ["accepted", "working"].includes(reservation.status);
   const machine = findMachine(reservation.machineId);
   const icon = categoryIcons[reservation.category] || categoryIcons[machine?.category] || "fa-tractor";
   const requestCode = reservationCode(reservation);
   const equipmentMarkup = reservationEquipmentMarkup(reservation, machine);
-  const actionsMarkup = reservationActionsMarkup(reservation, { canResolve, canStartWork, canFinishWork, canDeleteFinished, canRequestReschedule, canReportDelay });
+  const actionsMarkup = reservationActionsMarkup(reservation, { canResolve, canStartWork, canFinishWork, canDeleteFinished, canRequestReschedule, canReportDelay, canRespondScheduleCounter, canReviewContractor, canReviewProducer });
 
   return `
     <article class="reservation-card">
@@ -2051,12 +2118,10 @@ function reservationCard(reservation) {
         </div>
         <div class="reservation-head-actions">
           <span class="status-pill status-${reservation.status}">${statusLabels[reservation.status]}</span>
-          <button class="icon-btn reservation-menu-btn" type="button" aria-label="Mas opciones">
-            <i class="fa-solid fa-ellipsis-vertical"></i>
-          </button>
         </div>
       </div>
       ${solicitudLogisticsPanel(reservation, "producer")}
+      ${scheduleNegotiationSection(reservation, "producer")}
       ${reservationStatusTrack(reservation)}
       ${rescheduleSection(reservation)}
       ${delaySection(reservation)}
@@ -2080,6 +2145,23 @@ function reservationActionsMarkup(reservation, flags) {
     actions.push(`
       <button class="btn primary accept-reservation" type="button" data-reservation-id="${reservation.id}">
         <i class="fa-solid fa-check"></i> Aceptar
+      </button>
+    `);
+  }
+  if (flags.canRespondScheduleCounter) {
+    actions.push(`
+      <button class="btn primary accept-schedule-counter-btn" type="button" data-reservation-id="${reservation.id}">
+        <i class="fa-solid fa-check"></i> Aceptar propuesta
+      </button>
+    `);
+    actions.push(`
+      <button class="btn ghost keep-original-schedule-btn" type="button" data-reservation-id="${reservation.id}">
+        <i class="fa-regular fa-clock"></i> Mantener horario original
+      </button>
+    `);
+    actions.push(`
+      <button class="btn danger cancel-schedule-request-btn" type="button" data-reservation-id="${reservation.id}">
+        <i class="fa-solid fa-ban"></i> Cancelar solicitud
       </button>
     `);
   }
@@ -2111,6 +2193,20 @@ function reservationActionsMarkup(reservation, flags) {
       </button>
     `);
   }
+  if (flags.canReviewContractor) {
+    actions.push(`
+      <button class="btn ghost open-review-btn" type="button" data-reservation-id="${reservation.id}" data-reviewer-role="producer">
+        <i class="fa-solid fa-star"></i> Evaluar contratista
+      </button>
+    `);
+  }
+  if (flags.canReviewProducer) {
+    actions.push(`
+      <button class="btn ghost open-review-btn" type="button" data-reservation-id="${reservation.id}" data-reviewer-role="contractor">
+        <i class="fa-regular fa-star"></i> Evaluar productor
+      </button>
+    `);
+  }
   if (flags.canDeleteFinished) {
     actions.push(`
       <button class="btn danger delete-finished-reservation" type="button"
@@ -2121,6 +2217,46 @@ function reservationActionsMarkup(reservation, flags) {
     `);
   }
   return actions.length ? `<div class="reservation-actions">${actions.join("")}</div>` : "";
+}
+function scheduleNegotiationSection(reservation, viewContext = "producer") {
+  const proposal = reservation.scheduleProposal;
+  if (!proposal) return "";
+  const statusText = proposal.status === "accepted"
+    ? "Propuesta aceptada"
+    : proposal.status === "original_kept"
+      ? "El productor mantiene el horario original"
+      : proposal.status === "cancelled"
+        ? "Solicitud cancelada"
+        : "Contrapropuesta de horario";
+  const helper = viewContext === "contractor" && reservation.status === "schedule_counter"
+    ? "El precio, origen, destino y condiciones quedan bloqueados hasta que responda el productor."
+    : "Solo se negocia el horario; el resto de las condiciones no cambia.";
+  return `
+    <section class="schedule-negotiation-panel" aria-label="Negociacion de horario">
+      <div class="reschedule-panel-head">
+        <div>
+          <h4>${escapeHTML(statusText)}</h4>
+          <p>${helper}</p>
+        </div>
+        <span class="status-pill status-reschedule-pending">Horario</span>
+      </div>
+      <div class="reschedule-list">
+        <div class="reschedule-item">
+          <strong>${escapeHTML(scheduleProposalLabel(proposal))}</strong>
+          <small>Horario original: ${escapeHTML(originalScheduleLabel(reservation))}</small>
+          ${proposal.reason ? `<small>Motivo: ${escapeHTML(proposal.reason)}</small>` : ""}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function scheduleProposalLabel(proposal) {
+  return formatDateTimeRangeValues(proposal.date, proposal.date, proposal.startTime, proposal.endTime || proposal.startTime);
+}
+
+function originalScheduleLabel(reservation) {
+  return formatDateTimeRangeValues(reservation.originalDate || reservation.date, reservation.originalDate || reservation.date, reservation.originalStartTime || reservation.startTime, reservation.originalEndTime || reservation.endTime || reservation.startTime);
 }
 function delaySection(reservation) {
   const delays = delayHistoryFor(reservation.id);
@@ -2252,6 +2388,9 @@ function formatDateTimeRangeValues(start, end, startTime = "", endTime = "") {
 function reservationStatusTrack(reservation) {
   const status = typeof reservation === "string" ? reservation : reservation.status;
   if (status === "rejected") return `<p class="reservation-rejected"><i class="fa-solid fa-xmark-circle"></i> Solicitud rechazada</p>`;
+  if (status === "cancelled") return `<p class="reservation-rejected"><i class="fa-solid fa-ban"></i> Solicitud cancelada</p>`;
+  if (status === "schedule_counter") return `<p class="reservation-rejected neutral"><i class="fa-regular fa-clock"></i> Esperando respuesta del productor</p>`;
+  if (status === "original_kept") return `<p class="reservation-rejected neutral"><i class="fa-regular fa-clock"></i> El productor mantuvo el horario original</p>`;
   const steps = [
     { key: "pending",  label: "Solicitada" },
     { key: "accepted", label: "Aceptada" },
@@ -2333,9 +2472,11 @@ function reservationMetric(icon, label, value) {
 
 function formatDateRangeStack(reservation) {
   const start = formatDate(reservation.date);
-  if (reservation.dateFlexible) return `${start}<br><small>fin flexible</small>`;
-  if (reservation.dateEnd) return `${start}<br><small>al ${formatDate(reservation.dateEnd)}</small>`;
-  return start;
+  const time = reservationTimeLabel(reservation);
+  const startLabel = time ? `${start}<br><small>${escapeHTML(time)}</small>` : start;
+  if (reservation.dateFlexible) return `${startLabel}<br><small>fin flexible</small>`;
+  if (reservation.dateEnd) return `${startLabel}<br><small>al ${formatDate(reservation.dateEnd)}</small>`;
+  return startLabel;
 }
 
 function formatFieldStack(value) {
@@ -2388,6 +2529,149 @@ function timelineStamp(stepKey, reservation) {
   const time = timeByStep[stepKey];
   if (!time && stepKey !== "done") return "";
   return `<time>${formatDate(dateByStep[stepKey])}</time>${time ? `<strong>${time}</strong>` : ""}`;
+}
+function bindScheduleCounterModal() {
+  const form = $("#schedule-counter-form");
+  if (!form) return;
+  form.addEventListener("submit", submitScheduleCounterProposal);
+  form.addEventListener("input", hideScheduleCounterError);
+  $("#schedule-counter-close").addEventListener("click", closeScheduleCounterModal);
+  $("#schedule-counter-cancel").addEventListener("click", closeScheduleCounterModal);
+  $("#schedule-counter-modal").addEventListener("click", (e) => {
+    if (e.target.id === "schedule-counter-modal") closeScheduleCounterModal();
+  });
+}
+
+function openScheduleCounterModal(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  const form = $("#schedule-counter-form");
+  form.reset();
+  formControl(form, "reservationId").value = reservation.id;
+  formControl(form, "date").value = reservation.date || "";
+  formControl(form, "startTime").value = reservation.startTime || "08:00";
+  formControl(form, "endTime").value = reservation.endTime || "";
+  $("#schedule-counter-current").textContent = `Horario solicitado: ${originalScheduleLabel(reservation)}`;
+  hideScheduleCounterError();
+  $("#schedule-counter-modal").hidden = false;
+  formControl(form, "startTime").focus();
+}
+
+function closeScheduleCounterModal() {
+  $("#schedule-counter-modal").hidden = true;
+  hideScheduleCounterError();
+}
+
+function submitScheduleCounterProposal(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const reservation = state.reservations.find((item) => item.id === formControl(form, "reservationId").value);
+  if (!reservation) return;
+  const date = formControl(form, "date").value || reservation.date;
+  const startTime = formControl(form, "startTime").value;
+  const endTime = formControl(form, "endTime").value;
+  const reason = clean(formControl(form, "reason").value);
+  if (!startTime) {
+    showScheduleCounterError("Elegi una hora de inicio.");
+    return;
+  }
+  if (endTime && endTime <= startTime) {
+    showScheduleCounterError("La hora estimada de finalizacion debe ser posterior al inicio.");
+    return;
+  }
+  reservation.originalDate = reservation.originalDate || reservation.date;
+  reservation.originalStartTime = reservation.originalStartTime || reservation.startTime || "";
+  reservation.originalEndTime = reservation.originalEndTime || reservation.endTime || "";
+  reservation.scheduleProposal = {
+    date,
+    startTime,
+    endTime,
+    reason,
+    status: "pending",
+    proposedBy: currentUserId(),
+    createdAt: new Date().toISOString(),
+  };
+  reservation.status = "schedule_counter";
+  reservation.firstResponseAt = reservation.firstResponseAt || new Date().toISOString();
+  saveReservations();
+  emitAppEvent("schedule.proposed", { reservation });
+  closeScheduleCounterModal();
+  renderReservations();
+  renderMisOfertas();
+  updateBadges();
+  showToast("Contrapropuesta enviada. Esperando respuesta del productor.");
+}
+
+function acceptScheduleCounter(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId && item.status === "schedule_counter");
+  if (!reservation?.scheduleProposal) return;
+  reservation.date = reservation.scheduleProposal.date || reservation.date;
+  reservation.startTime = reservation.scheduleProposal.startTime || reservation.startTime || "";
+  reservation.endTime = reservation.scheduleProposal.endTime || reservation.endTime || reservation.startTime || "";
+  reservation.scheduleProposal.status = "accepted";
+  reservation.status = "accepted";
+  const now = new Date().toISOString();
+  reservation.firstResponseAt = reservation.firstResponseAt || now;
+  reservation.acceptedAt = reservation.acceptedAt || now;
+  reservation.wasAccepted = true;
+  reservation.resolvedAt = now;
+  markAvailabilitySlotPartiallyBooked(reservation.machineId);
+  saveReservations();
+  emitAppEvent("schedule.accepted", { reservation });
+  renderReservations();
+  renderMisOfertas();
+  updateBadges();
+  showToast("Propuesta aceptada. La contratacion quedo confirmada.");
+}
+
+function keepOriginalSchedule(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId && item.status === "schedule_counter");
+  if (!reservation?.scheduleProposal) return;
+  reservation.scheduleProposal.status = "original_kept";
+  reservation.status = "original_kept";
+  reservation.firstResponseAt = reservation.firstResponseAt || new Date().toISOString();
+  saveReservations();
+  emitAppEvent("schedule.original_kept", { reservation });
+  renderReservations();
+  renderMisOfertas();
+  updateBadges();
+  showToast("Horario original mantenido. El contratista debe aceptar o rechazar.");
+}
+
+function cancelScheduleRequest(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId && item.status === "schedule_counter");
+  if (!reservation) return;
+  if (reservation.scheduleProposal) reservation.scheduleProposal.status = "cancelled";
+  const now = new Date().toISOString();
+  reservation.status = "cancelled";
+  reservation.firstResponseAt = reservation.firstResponseAt || now;
+  reservation.resolvedAt = now;
+  saveReservations();
+  emitAppEvent("job.cancelled", { reservation });
+  renderReservations();
+  renderMisOfertas();
+  updateBadges();
+  showToast("Solicitud cancelada.");
+}
+
+function acceptNegotiatedSchedule(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  if (reservation.status === "schedule_counter") return;
+  setReservationStatus(reservationId, "accepted");
+}
+
+function showScheduleCounterError(message) {
+  const error = $("#schedule-counter-error");
+  error.textContent = message;
+  error.hidden = false;
+}
+
+function hideScheduleCounterError() {
+  const error = $("#schedule-counter-error");
+  if (!error) return;
+  error.textContent = "";
+  error.hidden = true;
 }
 function bindDelayModal() {
   const form = $("#delay-form");
@@ -2443,6 +2727,146 @@ function submitDelayRecord(e) {
   renderReservations();
   renderMisOfertas();
   showToast("Retraso registrado. El estado y la fecha del trabajo no cambiaron.");
+}
+
+
+function bindReviewModal() {
+  const form = $("#review-form");
+  if (!form) return;
+  form.addEventListener("submit", submitReview);
+  form.addEventListener("input", hideReviewError);
+  formControl(form, "comment")?.addEventListener("input", updateReviewCommentCounter);
+  $("#review-close")?.addEventListener("click", closeReviewModal);
+  $("#review-cancel")?.addEventListener("click", closeReviewModal);
+  $("#review-modal")?.addEventListener("click", (e) => {
+    if (e.target.id === "review-modal") closeReviewModal();
+  });
+}
+
+function openReviewModal(reservationId, reviewerRole) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation || reservation.status !== "done") {
+    showToast("Solo se pueden evaluar trabajos finalizados.");
+    return;
+  }
+  const role = reviewerRole === "contractor" ? "contractor" : "producer";
+  if (reviewForReservation(reservation.id, role)) {
+    showToast("Esta evaluacion ya fue enviada y no se puede editar.");
+    return;
+  }
+  const target = reviewTargetFor(reservation, role);
+  const form = $("#review-form");
+  form.reset();
+  formControl(form, "reservationId").value = reservation.id;
+  formControl(form, "reviewerRole").value = role;
+  $("#review-title").textContent = role === "producer" ? "Evaluar contratista" : "Evaluar productor";
+  $("#review-context").textContent = "Esta evaluacion queda asociada a una contratacion finalizada dentro de Agronex.";
+  $("#review-target-type").textContent = target.reviewedUserType;
+  $("#review-target-name").textContent = target.reviewedName;
+  $("#review-target-job").textContent = reservation.machineTitle + " - " + formatDateRange(reservation);
+  $("#review-work-again-label").textContent = "?Volverias a trabajar con este " + target.reviewedUserType.toLowerCase() + "?";
+  renderReviewCategoryFields(role);
+  updateReviewCommentCounter();
+  hideReviewError();
+  $("#review-modal").hidden = false;
+  formControl(form, "overallRating").focus();
+}
+
+function closeReviewModal() {
+  const modal = $("#review-modal");
+  if (modal) modal.hidden = true;
+  hideReviewError();
+}
+
+function renderReviewCategoryFields(reviewerRole) {
+  const target = $("#review-category-fields");
+  if (!target) return;
+  const categories = reviewCategoriesByRole[reviewerRole] || reviewCategoriesByRole.producer;
+  target.innerHTML = categories.map(([key, label]) => "\n    <label>\n      <span>" + escapeHTML(label) + "</span>\n      <select name=\"review_" + escapeHTML(key) + "\" required>\n        <option value=\"\">Estrellas</option>\n        <option value=\"5\">5 estrellas</option>\n        <option value=\"4\">4 estrellas</option>\n        <option value=\"3\">3 estrellas</option>\n        <option value=\"2\">2 estrellas</option>\n        <option value=\"1\">1 estrella</option>\n      </select>\n    </label>\n  ").join("");
+}
+
+function submitReview(e) {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const reservation = state.reservations.find((item) => item.id === formControl(form, "reservationId").value);
+  const reviewerRole = formControl(form, "reviewerRole").value === "contractor" ? "contractor" : "producer";
+  if (!reservation || reservation.status !== "done") {
+    showReviewError("Solo se pueden evaluar contrataciones finalizadas.");
+    return;
+  }
+  if (reviewForReservation(reservation.id, reviewerRole)) {
+    showReviewError("Ya enviaste esta evaluacion.");
+    return;
+  }
+  const overallRating = Number(formControl(form, "overallRating").value);
+  if (!validRating(overallRating)) {
+    showReviewError("Selecciona una calificacion general de 1 a 5 estrellas.");
+    return;
+  }
+  const wouldWorkAgain = clean(form.querySelector('input[name="wouldWorkAgain"]:checked')?.value);
+  if (!wouldWorkAgain) {
+    showReviewError("Indica si volverias a trabajar con este usuario.");
+    return;
+  }
+  const categories = {};
+  for (const [key] of reviewCategoriesByRole[reviewerRole] || []) {
+    const value = Number(formControl(form, "review_" + key)?.value);
+    if (!validRating(value)) {
+      showReviewError("Completa todos los aspectos especificos con 1 a 5 estrellas.");
+      return;
+    }
+    categories[key] = value;
+  }
+  const target = reviewTargetFor(reservation, reviewerRole);
+  const comment = clean(formControl(form, "comment").value).slice(0, 300);
+  const review = {
+    id: "review-" + Date.now() + "-" + Math.random().toString(16).slice(2),
+    reservationId: reservation.id,
+    reviewerId: target.reviewerId,
+    reviewerName: target.reviewerName,
+    reviewerRole,
+    reviewedUserId: target.reviewedUserId,
+    reviewedName: target.reviewedName,
+    reviewedUserType: target.reviewedUserType,
+    reviewedRole: target.reviewedRole,
+    overallRating,
+    categories,
+    wouldWorkAgain: wouldWorkAgain === "yes",
+    comment,
+    createdAt: new Date().toISOString(),
+  };
+  state.reviews.unshift(review);
+  saveReviews();
+  syncMachineRatingsFromReviews();
+  closeReviewModal();
+  renderReservations();
+  renderMisOfertas();
+  renderCatalog();
+  showToast("Evaluacion enviada. Gracias, suma confianza al perfil.");
+}
+
+function updateReviewCommentCounter() {
+  const value = clean(formControl($("#review-form"), "comment")?.value);
+  const counter = $("#review-comment-counter");
+  if (counter) counter.textContent = Math.min(value.length, 300) + "/300";
+}
+
+function showReviewError(message) {
+  const error = $("#review-error");
+  if (!error) return;
+  error.textContent = message;
+  error.hidden = false;
+}
+
+function hideReviewError() {
+  const error = $("#review-error");
+  if (!error) return;
+  error.textContent = "";
+  error.hidden = true;
+}
+
+function validRating(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 5;
 }
 
 function showDelayError(message) {
@@ -2548,6 +2972,8 @@ function submitRescheduleRequest(e) {
   saveRescheduleRequests();
   closeRescheduleModal();
   renderReservations();
+  renderMisOfertas();
+  updateBadges();
   showToast("Propuesta de reprogramacion enviada. La fecha no cambia hasta que sea aceptada.");
 }
 
@@ -2568,6 +2994,7 @@ function acceptRescheduleRequest(id) {
   saveRescheduleRequests();
   renderReservations();
   renderMisOfertas();
+  updateBadges();
   showToast("Reprogramacion aceptada. La fecha del trabajo fue actualizada.");
 }
 
@@ -2579,6 +3006,7 @@ function rejectRescheduleRequest(id) {
   saveRescheduleRequests();
   renderReservations();
   renderMisOfertas();
+  updateBadges();
   showToast("Reprogramacion rechazada. La fecha original se mantiene.");
 }
 
@@ -2595,6 +3023,210 @@ function hideRescheduleError() {
   error.hidden = true;
 }
 
+
+function reviewForReservation(reservationId, reviewerRole) {
+  return state.reviews.find((item) => item.reservationId === reservationId && item.reviewerRole === reviewerRole);
+}
+
+function reviewTargetFor(reservation, reviewerRole) {
+  const contractorName = reservationContractorLabel(reservation, false);
+  const producerName = reservationRequesterLabel(reservation, false);
+  if (reviewerRole === "contractor") {
+    return {
+      reviewerId: contractorProfileId(contractorName),
+      reviewerName: contractorName,
+      reviewedUserId: producerProfileId(producerName),
+      reviewedName: producerName,
+      reviewedUserType: "Productor",
+      reviewedRole: "producer",
+    };
+  }
+  return {
+    reviewerId: producerProfileId(producerName),
+    reviewerName: producerName,
+    reviewedUserId: contractorProfileId(contractorName),
+    reviewedName: contractorName,
+    reviewedUserType: "Contratista",
+    reviewedRole: "contractor",
+  };
+}
+
+function contractorProfileId(name) {
+  return "contractor:" + profileKey(name || "contratista");
+}
+
+function producerProfileId(name) {
+  return "producer:" + profileKey(name || "productor");
+}
+
+function profileKey(value) {
+  return clean(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-");
+}
+
+function reviewsForProfile(kind, name) {
+  const id = kind === "contractor" ? contractorProfileId(name) : producerProfileId(name);
+  return state.reviews.filter((item) => item.reviewedUserId === id || (item.reviewedRole === kind && profileKey(item.reviewedName) === profileKey(name)));
+}
+
+function reservationsForProfile(kind, name) {
+  const targetName = clean(name);
+  if (kind === "contractor") {
+    return state.reservations.filter((item) => clean(item.owner) === targetName);
+  }
+  return state.reservations.filter((item) => clean(item.requestedByName || item.requestedBy) === targetName);
+}
+
+function completedReservationsForProfile(kind, name) {
+  return reservationsForProfile(kind, name).filter((item) => item.status === "done");
+}
+
+function automaticReputationMetrics(kind, name) {
+  const reservations = reservationsForProfile(kind, name);
+  const completed = reservations.filter((item) => item.status === "done");
+  const acceptedLike = reservations.filter((item) => ["accepted", "working", "done", "original_kept"].includes(item.status) || item.acceptedAt || item.wasAccepted);
+  const responded = reservations.filter((item) => ["accepted", "rejected", "cancelled", "schedule_counter", "original_kept", "done", "working"].includes(item.status) || item.firstResponseAt || item.resolvedAt || item.acceptedAt);
+  const cancelledAfterAccepted = reservations.filter((item) => ["cancelled", "rejected"].includes(item.status) && (item.wasAccepted || item.acceptedAt || item.startedAt));
+  const started = reservations.filter((item) => item.startedAt || ["working", "done"].includes(item.status));
+  const responseMinutes = reservations
+    .map((item) => responseMinutesForReservation(item))
+    .filter((value) => Number.isFinite(value) && value >= 0);
+  return {
+    totalRequests: reservations.length,
+    acceptedCount: acceptedLike.length,
+    responseCount: responded.length,
+    acceptanceRate: reservations.length ? Math.round((acceptedLike.length / reservations.length) * 100) : null,
+    cancellationRate: acceptedLike.length ? Math.round((cancelledAfterAccepted.length / acceptedLike.length) * 100) : null,
+    averageResponseMinutes: responseMinutes.length ? Math.round(average(responseMinutes)) : null,
+    completedCount: completed.length,
+    startedCount: started.length,
+    complianceRate: started.length ? Math.round((completed.length / started.length) * 100) : null,
+    latestActivity: latestDate([
+      ...reservations.map((item) => item.resolvedAt || item.startedAt || item.acceptedAt || item.createdAt || item.date),
+    ]),
+    memberSince: memberSinceFor(name),
+  };
+}
+
+function responseMinutesForReservation(reservation) {
+  const created = new Date(reservation.createdAt || reservation.date);
+  const response = new Date(reservation.firstResponseAt || reservation.acceptedAt || reservation.resolvedAt || "");
+  if (Number.isNaN(created.getTime()) || Number.isNaN(response.getTime())) return null;
+  return Math.max(0, Math.round((response.getTime() - created.getTime()) / 60000));
+}
+
+function profileReputationSummary(kind, name) {
+  const reviews = reviewsForProfile(kind, name);
+  const metrics = automaticReputationMetrics(kind, name);
+  const avg = reviews.length ? average(reviews.map((item) => Number(item.overallRating))) : null;
+  const wouldAgain = reviews.length ? Math.round((reviews.filter((item) => item.wouldWorkAgain).length / reviews.length) * 100) : null;
+  const latest = latestDate([
+    ...reviews.map((item) => item.createdAt),
+    metrics.latestActivity,
+  ]);
+  return {
+    reviews,
+    metrics,
+    completedCount: metrics.completedCount,
+    averageRating: avg,
+    evaluationCount: reviews.length,
+    wouldAgainPercent: wouldAgain,
+    latestActivity: latest,
+  };
+}
+
+function reputationStatsForProfile(kind, name) {
+  const summary = profileReputationSummary(kind, name);
+  const metrics = summary.metrics;
+  return [
+    { label: "Promedio general", value: typeof summary.averageRating === "number" ? summary.averageRating.toFixed(1) + "/5" : "" },
+    { label: "Trabajos completados", value: metrics.completedCount ? String(metrics.completedCount) : "" },
+    { label: "Evaluaciones", value: summary.evaluationCount ? String(summary.evaluationCount) : "" },
+    { label: "Volverian a contratar", value: typeof summary.wouldAgainPercent === "number" ? summary.wouldAgainPercent + "%" : "" },
+    { label: "Tasa de aceptacion", value: typeof metrics.acceptanceRate === "number" ? metrics.acceptanceRate + "%" : "" },
+    { label: "Tasa de cancelacion", value: typeof metrics.cancellationRate === "number" ? metrics.cancellationRate + "%" : "" },
+    { label: "Respuesta promedio", value: formatResponseTime(metrics.averageResponseMinutes) },
+    { label: "Cumplimiento", value: typeof metrics.complianceRate === "number" ? metrics.complianceRate + "%" : "" },
+    { label: "Antiguedad", value: metrics.memberSince ? "Desde " + metrics.memberSince : "" },
+    { label: "Ultima actividad", value: summary.latestActivity ? formatDate(summary.latestActivity) : "" },
+  ];
+}
+
+function reputationBadgesForProfile(kind, name) {
+  const summary = profileReputationSummary(kind, name);
+  const metrics = summary.metrics;
+  const reviews = summary.reviews;
+  const badges = [];
+  const punctualityKeys = kind === "contractor" ? ["punctuality"] : ["loadPunctuality"];
+  const punctualityAvg = average(reviews.flatMap((item) => punctualityKeys.map((key) => Number(item.categories?.[key])).filter(Number.isFinite)));
+  if (typeof punctualityAvg === "number" && punctualityAvg >= 4.6 && reviews.length >= 2) badges.push("Excelente puntualidad");
+  if (typeof metrics.averageResponseMinutes === "number" && metrics.averageResponseMinutes <= 180 && metrics.responseCount >= 2) badges.push("Respuesta rapida");
+  if (typeof metrics.acceptanceRate === "number" && metrics.acceptanceRate >= 85 && metrics.totalRequests >= 3) badges.push("Alta tasa de aceptacion");
+  if (kind === "contractor" && metrics.completedCount >= 3 && (metrics.cancellationRate ?? 0) <= 10 && (summary.wouldAgainPercent ?? 100) >= 80) badges.push("Contratista confiable");
+  if (kind === "producer" && metrics.completedCount >= 3 && (metrics.cancellationRate ?? 0) <= 10 && (summary.wouldAgainPercent ?? 100) >= 80) badges.push("Productor confiable");
+  return uniqueList(badges);
+}
+
+function recentReviewCommentsForProfile(kind, name) {
+  return reviewsForProfile(kind, name)
+    .filter((item) => clean(item.comment))
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, 3);
+}
+
+function average(values) {
+  const valid = values.filter((value) => Number.isFinite(value));
+  if (!valid.length) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+}
+
+function latestDate(values) {
+  const valid = values.map((value) => new Date(value)).filter((date) => !Number.isNaN(date.getTime()));
+  if (!valid.length) return null;
+  return valid.sort((a, b) => b.getTime() - a.getTime())[0].toISOString();
+}
+
+function formatResponseTime(minutes) {
+  if (!Number.isFinite(minutes)) return "";
+  if (minutes < 60) return minutes + " min";
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return hours + " h";
+  const days = Math.round(hours / 24);
+  return days + " dia" + (days === 1 ? "" : "s");
+}
+
+function syncMachineRatingsFromReviews() {
+  state.machines.forEach((machine) => {
+    const reviews = reviewsForProfile("contractor", machine.owner);
+    if (!reviews.length) return;
+    machine.rating = Number(average(reviews.map((item) => Number(item.overallRating))).toFixed(1));
+    machine.reviews = reviews.length;
+  });
+  saveMachines();
+}
+
+function emitReviewNotificationsForCompletedJob(reservation) {
+  if (!reviewForReservation(reservation.id, "producer")) {
+    createNotification({
+      user_id: currentUserId(),
+      type: "review",
+      title: "Califica al contratista",
+      body: reservation.machineTitle + " finalizo. Deja una evaluacion verificada.",
+      priority: "MEDIUM",
+      related_id: reservation.id,
+    });
+  }
+  if (!reviewForReservation(reservation.id, "contractor")) {
+    createNotification({
+      user_id: currentUserId(),
+      type: "review",
+      title: "Califica al productor",
+      body: reservation.machineTitle + " finalizo. Registra como fue la coordinacion.",
+      priority: "MEDIUM",
+      related_id: reservation.id,
+    });
+  }
+}
+
 function currentUserId() {
   return clean(state.auth?.email) || "local-user";
 }
@@ -2603,7 +3235,7 @@ function currentUserLabel() {
   return clean(state.profile.name) || clean(state.auth?.name) || "Usuario local";
 }
 function deleteReservation(id) {
-  const index = state.reservations.findIndex((r) => r.id === id && (r.status === "done" || r.status === "rejected"));
+  const index = state.reservations.findIndex((r) => r.id === id && ["done", "rejected", "cancelled"].includes(r.status));
   if (index === -1) return;
   state.reservations.splice(index, 1);
   saveReservations();
@@ -2615,12 +3247,27 @@ function deleteReservation(id) {
 function setReservationStatus(id, status) {
   const res = state.reservations.find((r) => r.id === id);
   if (!res) return;
+  const now = new Date().toISOString();
+  if (["accepted", "rejected", "cancelled"].includes(status) && !res.firstResponseAt) res.firstResponseAt = now;
+  if (status === "accepted") {
+    res.acceptedAt = res.acceptedAt || now;
+    res.wasAccepted = true;
+  }
+  if (status === "working") {
+    res.startedAt = res.startedAt || now;
+  }
+  if (status === "done") {
+    res.completedAt = now;
+    res.startedAt = res.startedAt || now;
+  }
+  if (["cancelled", "rejected"].includes(status) && (res.acceptedAt || res.startedAt)) res.wasAccepted = true;
   res.status = status;
-  res.resolvedAt = new Date().toISOString();
+  res.resolvedAt = now;
   if (status === "accepted") markAvailabilitySlotPartiallyBooked(res.machineId);
   saveReservations();
   if (status === "accepted") emitAppEvent("job.accepted", { reservation: res });
   if (status === "rejected") emitAppEvent("job.cancelled", { reservation: res });
+  if (status === "done") emitReviewNotificationsForCompletedJob(res);
   renderReservations();
   renderMisOfertas();
   updateBadges();
@@ -2646,6 +3293,8 @@ function openRequestModal(machineId) {
   formControl(form, "machineId").value = machine.id;
   syncRequestMode(form, machine);
   formControl(form, "date").min = new Date().toISOString().slice(0, 10);
+  formControl(form, "startTime").value = "";
+  formControl(form, "endTime").value = "";
   formControl(form, "dateEnd").min = formControl(form, "date").min;
   syncRequestDateRange(form);
   updateRequestEstimate(form);
@@ -2744,7 +3393,6 @@ function syncRequestMode(form, machine) {
   form.dataset.serviceType = config.serviceType;
 
   toggleField("#request-deadline-field", config.showDeadline);
-  toggleField("#request-flexible-field", config.showFlexible);
   toggleField("#request-urgency-field", config.showUrgency);
   toggleField("#request-job-field", config.showJob);
   toggleField("#job-other-field", false);
@@ -2773,8 +3421,7 @@ function syncRequestMode(form, machine) {
 function clearHiddenRequestFields(form, config) {
   const machine = findMachine(formControl(form, "machineId")?.value);
   const quantityFields = requestQuantityFieldsForPriceUnit(normalizePriceUnit(machine?.priceUnit, machine?.category));
-  if (!config.showDeadline) formControl(form, "dateEnd").value = "";
-  if (!config.showFlexible) formControl(form, "dateFlexible").checked = false;
+  if (!config.showDeadline) formControl(form, "dateEnd").value = "";
   if (!config.showUrgency) formControl(form, "urgency").value = "flexible";
   if (!config.showCrop) formControl(form, "crop").value = "";
   if (!config.showGrain) formControl(form, "grainType").value = "";
@@ -2818,6 +3465,9 @@ function reservationFromForm(form, machine) {
     category:     machine.category,
     status:       "pending",
     date:         formControl(form, "date").value,
+    
+    startTime:    clean(formControl(form, "startTime").value),
+    endTime:      clean(formControl(form, "endTime").value),
     serviceType:  config.serviceType,
     jobType:      formControl(form, "job").value,
     job:          formControl(form, "job").value,
@@ -2884,7 +3534,7 @@ function buildDefaultReservationPayload(form, location) {
   const jobOther = clean(formControl(form, "jobOther").value);
   return {
     dateEnd:      clean(formControl(form, "dateEnd").value),
-    dateFlexible: formControl(form, "dateFlexible").checked,
+    dateFlexible: !clean(formControl(form, "dateEnd").value),
     hectares:     requestPositiveNumber(form, "hectares"),
     estimatedTons: requestPositiveNumber(form, "estimatedTons"),
     estimatedBags: requestPositiveNumber(form, "estimatedBags"),
@@ -3369,31 +4019,30 @@ function toggleJobOther(form) {
 }
 
 function syncRequestDateRange(form) {
-  const dateStart = formControl(form, "date").value || new Date().toISOString().slice(0, 10);
-  formControl(form, "dateEnd").min = dateStart;
-  const flexible = formControl(form, "dateFlexible").checked;
-  formControl(form, "dateEnd").disabled = flexible;
-  if (flexible) formControl(form, "dateEnd").value = "";
+  const dateStart = formControl(form, "date").value;
+  const dateEnd = formControl(form, "dateEnd");
+  if (!dateEnd) return;
+  dateEnd.min = dateStart;
+  if (dateEnd.value && dateStart && dateEnd.value < dateStart) dateEnd.value = "";
 }
 
 function updateRequestEstimate(form) {
   const estimate = $("#request-estimate");
-  const machine = findMachine(formControl(form, "machineId")?.value);
   if (estimate) {
-    const hectares = Number(formControl(form, "hectares").value);
-    if (Number.isFinite(hectares) && hectares > 0 && !$(".request-hectares-field")?.hidden) {
-      const hours = Math.max(1, Math.ceil(hectares / 18));
-      const label = hours <= 8 ? "1 jornada de trabajo" : `${Math.ceil(hours / 8)} jornadas de trabajo`;
-      estimate.textContent = `Duracion estimada: ${label} · aprox. ${hours} h`;
-      estimate.hidden = false;
-    } else {
-      estimate.hidden = true;
-      estimate.textContent = "";
-    }
+    estimate.hidden = true;
+    estimate.textContent = "";
   }
-  updateRequestEconomicSummary(form, machine);
+  updateRequestEconomicSummary(form, findMachine(formControl(form, "machineId")?.value));
 }
 
+function requestDurationEstimateLabel(form) {
+  const hectaresField = $(".request-hectares-field");
+  const hectares = Number(formControl(form, "hectares").value);
+  if (!hectaresField || hectaresField.hidden || !Number.isFinite(hectares) || hectares <= 0) return "";
+  const hours = Math.max(1, Math.ceil(hectares / 18));
+  const label = hours <= 8 ? "1 jornada de trabajo" : `${Math.ceil(hours / 8)} jornadas de trabajo`;
+  return `${label} · aprox. ${hours} h`;
+}
 function updateRequestEconomicSummary(form, machine) {
   const summary = $("#request-economic-summary");
   if (!summary) return;
@@ -3407,6 +4056,8 @@ function updateRequestEconomicSummary(form, machine) {
   }
   total.textContent = formatEstimatedMoney(context.estimate.estimatedValue);
   const lineItems = economicSummaryLines(context, form);
+  const durationLabel = requestDurationEstimateLabel(form);
+  if (durationLabel) lineItems.push(["Duracion estimada", durationLabel]);
   lines.innerHTML = lineItems.map(([label, value]) => `
     <div class="economic-summary-line"><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>
   `).join("");
@@ -3425,6 +4076,10 @@ function validateRequestForm(form) {
   syncRequestDateRange(form);
 
   if (!formControl(form, "date").value) return { valid: false, message: "Elegi una fecha para el trabajo." };
+  const startTime = clean(formControl(form, "startTime").value);
+  const endTime = clean(formControl(form, "endTime").value);
+  if (!startTime) return { valid: false, message: "Elegi una hora de inicio." };
+  if (endTime && endTime <= startTime) return { valid: false, message: "La hora estimada de finalizacion debe ser posterior al inicio." };
 
   const validateVisibleFields = requestValidators[mode] || requestValidators.default;
   const visibleResult = validateVisibleFields(form);
@@ -3593,6 +4248,26 @@ function closeConfirmModal() {
   pendingAction = null;
 }
 
+function bindContactModal() {
+  $("#contact-button")?.addEventListener("click", openContactModal);
+  $("#contact-close")?.addEventListener("click", closeContactModal);
+  $("#contact-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "contact-modal") closeContactModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("#contact-modal")?.hidden) closeContactModal();
+  });
+}
+
+function openContactModal() {
+  const modal = $("#contact-modal");
+  if (modal) modal.hidden = false;
+}
+
+function closeContactModal() {
+  const modal = $("#contact-modal");
+  if (modal) modal.hidden = true;
+}
 function bindConfirmModal() {
   $("#confirm-close").addEventListener("click", closeConfirmModal);
   $("#confirm-cancel").addEventListener("click", closeConfirmModal);
@@ -3673,6 +4348,36 @@ function notificationFromEvent(eventName, payload) {
       title: "Solicitud rechazada",
       body: `${machineTitle} fue rechazada. La fecha original no cambia.`,
       priority: "HIGH",
+      related_id: reservation.id,
+    };
+  }
+  if (eventName === "schedule.proposed") {
+    return {
+      user_id: currentUserId(),
+      type: "system",
+      title: "Nuevo horario propuesto",
+      body: `El contratista propuso ${scheduleProposalLabel(reservation.scheduleProposal)} para ${machineTitle}.`,
+      priority: "MEDIUM",
+      related_id: reservation.id,
+    };
+  }
+  if (eventName === "schedule.accepted") {
+    return {
+      user_id: currentUserId(),
+      type: "job_accepted",
+      title: "Horario aceptado",
+      body: `${machineTitle} quedo confirmado con el horario propuesto.`,
+      priority: "MEDIUM",
+      related_id: reservation.id,
+    };
+  }
+  if (eventName === "schedule.original_kept") {
+    return {
+      user_id: currentUserId(),
+      type: "system",
+      title: "Horario original mantenido",
+      body: `El productor mantuvo el horario original de ${machineTitle}.`,
+      priority: "MEDIUM",
       related_id: reservation.id,
     };
   }
@@ -3814,7 +4519,7 @@ function openNotificationDetail(id) {
   saveNotifications();
   renderNotifications();
   updateBadges();
-  if (["job_request", "job_accepted", "job_cancelled"].includes(notification.type)) {
+  if (["job_request", "job_accepted", "job_cancelled", "review"].includes(notification.type)) {
     if (notification.type === "job_request") state.offersTab = "solicitudes";
     showScreen(notification.type === "job_request" ? "mis-ofertas" : "reservas");
   }
@@ -3903,6 +4608,7 @@ function notificationIcon(type) {
     job_accepted: "fa-circle-check",
     job_cancelled: "fa-triangle-exclamation",
     message: "fa-message",
+    review: "fa-star",
     system: "fa-circle-info",
   };
   return icons[type] || icons.system;
@@ -3945,7 +4651,7 @@ function timeAgo(value) {
   return formatDate(value);
 }
 function updateBadges() {
-  const pendingCount = state.reservations.filter((r) => r.status === "pending").length;
+  const pendingCount = state.reservations.filter(isContractorNegotiationStatus).length;
   const badge = $("#reservation-badge");
   badge.hidden = pendingCount === 0;
   badge.textContent = pendingCount;
@@ -3975,6 +4681,9 @@ function saveRescheduleRequests() {
 }
 function saveDelayRecords() {
   localStorage.setItem(STORAGE_KEYS.delays, JSON.stringify(state.delayRecords));
+}
+function saveReviews() {
+  localStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(state.reviews));
 }
 function saveAvailabilitySlots() {
   localStorage.setItem(STORAGE_KEYS.availabilitySlots, JSON.stringify(state.availabilitySlots));
@@ -4092,9 +4801,19 @@ function money(value) { return Number(value || 0).toLocaleString("es-AR"); }
 
 function formatDateRange(reservation) {
   const start = formatDate(reservation.date);
-  if (reservation.dateFlexible) return `${start} - flexible`;
-  if (reservation.dateEnd) return `${start} - ${formatDate(reservation.dateEnd)}`;
-  return start;
+  const time = reservationTimeLabel(reservation);
+  const startLabel = time ? `${start} · ${time}` : start;
+  if (reservation.dateFlexible) return `${startLabel} - flexible`;
+  if (reservation.dateEnd) return `${startLabel} - ${formatDate(reservation.dateEnd)}`;
+  return startLabel;
+}
+
+function reservationTimeLabel(reservation) {
+  const startTime = clean(reservation.startTime);
+  const endTime = clean(reservation.endTime);
+  if (startTime && endTime && endTime !== startTime) return `${startTime} a ${endTime} hs`;
+  if (startTime) return `${startTime} hs`;
+  return "";
 }
 
 function formatDate(value) {

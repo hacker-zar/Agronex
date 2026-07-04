@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NexuDrive MVP</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/favicon.png">
   <script>
     document.documentElement.dataset.theme = localStorage.getItem("nexudrive_mvp_theme") || "normal";
   </script>
@@ -470,6 +472,16 @@
           <div class="public-profile-stats" id="public-profile-stats"></div>
         </section>
 
+        <section class="public-profile-section" id="public-profile-comments-section">
+          <h3>Comentarios recientes</h3>
+          <div class="public-profile-list" id="public-profile-comments"></div>
+        </section>
+
+        <section class="public-profile-section" id="public-profile-badges-section">
+          <h3>Distintivos</h3>
+          <div class="profile-chip-list" id="public-profile-badges"></div>
+        </section>
+
         <section class="public-profile-section" id="public-profile-specialties-section">
           <h3>Especialidades</h3>
           <div class="profile-chip-list" id="public-profile-specialties"></div>
@@ -607,6 +619,14 @@
           <span id="request-date-label">Inicio estimado</span>
           <input name="date" type="date" required>
         </label>
+        <label>
+          <span>Hora de inicio</span>
+          <input name="startTime" type="time" required>
+        </label>
+        <label>
+          <span>Hora estimada de finalizacion (opcional)</span>
+          <input name="endTime" type="time">
+        </label>
         <label id="request-deadline-field">
           <span>Fecha limite (opcional)</span>
           <input name="dateEnd" type="date" placeholder="Flexible">
@@ -672,10 +692,6 @@
           <input name="cargoType" maxlength="80" placeholder="Ej: Maiz, soja, fertilizante">
         </label>
       </div>
-      <label class="inline-check" id="request-flexible-field">
-        <input name="dateFlexible" type="checkbox">
-        <span>Fecha limite flexible</span>
-      </label>
       <label class="full-field" id="request-job-field">
         <span>Trabajo solicitado</span>
         <select name="job" required>
@@ -890,6 +906,107 @@
     </form>
   </div>
 
+  <!-- MODAL CONTRAPROPUESTA DE HORARIO -->
+  <div class="modal-backdrop" id="schedule-counter-modal" hidden>
+    <form class="modal modal-confirm" id="schedule-counter-form" novalidate>
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Negociacion de horario</p>
+          <h2>Proponer otro horario</h2>
+        </div>
+        <button class="icon-btn" type="button" id="schedule-counter-close" aria-label="Cerrar propuesta de horario">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <input type="hidden" name="reservationId">
+      <p class="confirm-body" id="schedule-counter-current">Horario solicitado</p>
+      <div class="form-grid">
+        <label>
+          <span>Fecha</span>
+          <input name="date" type="date">
+        </label>
+        <label>
+          <span>Hora de inicio</span>
+          <input name="startTime" type="time" required>
+        </label>
+        <label>
+          <span>Hora estimada de finalizacion</span>
+          <input name="endTime" type="time">
+        </label>
+      </div>
+      <label class="full-field">
+        <span>Motivo opcional</span>
+        <textarea name="reason" rows="3" maxlength="100" placeholder="Ej.: termino otro trabajo a la manana"></textarea>
+      </label>
+      <p class="form-error" id="schedule-counter-error" role="alert" hidden></p>
+      <div class="form-actions">
+        <button class="btn ghost" type="button" id="schedule-counter-cancel">Cancelar</button>
+        <button class="btn primary" type="submit">
+          <i class="fa-solid fa-clock-rotate-left"></i> Enviar propuesta
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- MODAL EVALUACION -->
+  <div class="modal-backdrop" id="review-modal" hidden>
+    <form class="modal review-modal" id="review-form" novalidate>
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Evaluacion verificada</p>
+          <h2 id="review-title">Calificar usuario</h2>
+        </div>
+        <button class="icon-btn" type="button" id="review-close" aria-label="Cerrar evaluacion">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <input type="hidden" name="reservationId">
+      <input type="hidden" name="reviewerRole">
+      <p class="review-context" id="review-context"></p>
+      <div class="review-target-card">
+        <span id="review-target-type">Usuario</span>
+        <strong id="review-target-name">Usuario Agronex</strong>
+        <small id="review-target-job">Trabajo finalizado</small>
+      </div>
+      <label class="full-field">
+        <span>Calificacion general</span>
+        <select name="overallRating" required>
+          <option value="">Seleccionar estrellas</option>
+          <option value="5">★★★★★ Excelente</option>
+          <option value="4">★★★★ Muy buena</option>
+          <option value="3">★★★ Correcta</option>
+          <option value="2">★★ Regular</option>
+          <option value="1">★ Mala</option>
+        </select>
+      </label>
+      <fieldset class="review-choice">
+        <legend id="review-work-again-label">¿Volverias a trabajar con este usuario?</legend>
+        <label>
+          <input type="radio" name="wouldWorkAgain" value="yes" required>
+          <span>Si</span>
+        </label>
+        <label>
+          <input type="radio" name="wouldWorkAgain" value="no" required>
+          <span>No</span>
+        </label>
+      </fieldset>
+      <div class="review-category-grid" id="review-category-fields"></div>
+      <label class="full-field">
+        <span>Comentario (opcional)</span>
+        <textarea name="comment" rows="4" maxlength="300" placeholder="Resumen breve de la experiencia, sin datos personales."></textarea>
+        <small id="review-comment-counter">0/300</small>
+      </label>
+      <p class="form-error" id="review-error" hidden></p>
+      <p class="review-note">Solo se puede evaluar una vez y no se puede editar despues de enviar.</p>
+      <div class="form-actions">
+        <button class="btn ghost" type="button" id="review-cancel">Cancelar</button>
+        <button class="btn primary" type="submit">
+          <span class="btn-label"><i class="fa-solid fa-star"></i> Enviar evaluacion</span>
+        </button>
+      </div>
+    </form>
+  </div>
+
   <!-- MODAL DENUNCIA -->
   <div class="modal-backdrop" id="report-modal" hidden>
     <form class="modal report-modal" id="report-form" novalidate>
@@ -949,6 +1066,42 @@
       </div>
     </div>
   </div>
+
+  <!-- CONTACTO -->
+  <div class="modal-backdrop" id="contact-modal" hidden>
+    <div class="modal contact-modal" role="dialog" aria-modal="true" aria-labelledby="contact-title">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Soporte</p>
+          <h2 id="contact-title">Contacto</h2>
+        </div>
+        <button class="icon-btn" type="button" id="contact-close" aria-label="Cerrar contacto">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="contact-options">
+        <a class="contact-option" href="https://wa.me/543415158464" target="_blank" rel="noopener">
+          <span class="contact-option-icon whatsapp"><i class="fa-brands fa-whatsapp"></i></span>
+          <span>
+            <strong>Telefono / WhatsApp</strong>
+            <small>+54 341 515-8464</small>
+          </span>
+        </a>
+        <a class="contact-option" href="mailto:agronex.app@gmail.com">
+          <span class="contact-option-icon email"><i class="fa-regular fa-envelope"></i></span>
+          <span>
+            <strong>Correo electronico</strong>
+            <small>agronex.app@gmail.com</small>
+          </span>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <button class="contact-floating-btn" id="contact-button" type="button">
+    <i class="fa-regular fa-comments"></i>
+    <span>Contacto</span>
+  </button>
 
   <div class="toast" id="toast" hidden></div>
   <div class="notification-toast" id="notification-toast" hidden></div>
