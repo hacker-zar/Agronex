@@ -1,5 +1,9 @@
 "use strict";
 
+const TERMS_VERSION = "1.0";
+const TERMS_EFFECTIVE_DATE = "2026-06-11";
+const TERMS_URL = "legal/terminos-agronex.html";
+
 const STORAGE_KEYS = {
   machines: "nexudrive_mvp_machines",
   reservations: "nexudrive_mvp_reservations",
@@ -16,6 +20,7 @@ const seedMachines = [
     title: "Tractor John Deere 6120J",
     category: "Tractor",
     price: 35,
+    priceUnit: "hectarea",
     location: "Venado Tuerto, Santa Fe",
     availability: "Disponible ma\u00f1ana",
     availableTomorrow: true,
@@ -30,6 +35,7 @@ const seedMachines = [
     title: "Sembradora John Deere 1113",
     category: "Sembradora",
     price: 85,
+    priceUnit: "hectarea",
     location: "Pergamino, Buenos Aires",
     availability: "Disponible",
     availableToday: true,
@@ -45,6 +51,7 @@ const seedMachines = [
     title: "Cosechadora Case IH 8250",
     category: "Cosechadora",
     price: 120,
+    priceUnit: "hectarea",
     location: "Junín, Buenos Aires",
     availability: "Disponible desde la próxima semana",
     owner: "La Campana Servicios",
@@ -58,6 +65,7 @@ const seedMachines = [
     title: "Pulverizadora Jacto Uniport",
     category: "Pulverizadora",
     price: 55,
+    priceUnit: "hectarea",
     location: "Rojas, Buenos Aires",
     availability: "Disponible",
     availableToday: true,
@@ -71,7 +79,8 @@ const seedMachines = [
     id: "m-camion-scania",
     title: "Camión Scania R450 con acoplado",
     category: "Camion",
-    price: 28,
+    price: 3500,
+    priceUnit: "kilometro",
     location: "Rosario, Santa Fe",
     availability: "Disponible para la cosecha",
     owner: "Transportes Del Campo",
@@ -84,7 +93,8 @@ const seedMachines = [
     id: "m-embolsadora-richiger",
     title: "Embolsadora Richiger E-900",
     category: "Embolsadora",
-    price: 18,
+    price: 7500,
+    priceUnit: "tonelada",
     location: "Córdoba Capital",
     availability: "Disponible esta cosecha",
     owner: "Agrobolsas Sur",
@@ -147,11 +157,32 @@ const priceUnitsByCategory = {
   Extractora: ["tonelada", "bolsa"],
   Camion: ["viaje", "tonelada", "kilometro", "tonelada_kilometro"],
   Dron: ["hectarea"],
+  Acoplado: ["viaje", "tonelada", "kilometro"],
   Tolva: ["viaje", "tonelada", "hora"],
   Tractor: ["hora", "dia", "hectarea"],
   Otros: ["hectarea", "tonelada", "viaje", "hora", "dia", "bolsa", "fijo"],
   default: ["hectarea", "tonelada", "viaje", "hora", "dia", "bolsa", "fijo"],
 };
+const defaultPriceUnitByCategory = {
+  Tractor: "hectarea",
+  Sembradora: "hectarea",
+  Pulverizadora: "hectarea",
+  Fertilizadora: "hectarea",
+  Cosechadora: "hectarea",
+  Dron: "hectarea",
+  Acoplado: "viaje",
+  Tolva: "viaje",
+  Camion: "kilometro",
+  Embolsadora: "tonelada",
+  Extractora: "tonelada",
+  Otros: "hectarea",
+};
+
+const seedPricingCorrections = {
+  "m-camion-scania": { oldPrice: 28, price: 3500, priceUnit: "kilometro" },
+  "m-embolsadora-richiger": { oldPrice: 18, price: 7500, priceUnit: "tonelada" },
+};
+
 const statusLabels = {
   pending:  "Pendiente",
   accepted: "Aceptada",
@@ -192,7 +223,6 @@ const state = {
     hectares: "120",
     baseLocation: "Pergamino, Buenos Aires",
     operationRadiusKm: 80,
-    role:     "Productor y contratista",
     bio:      "",
   }),
   publishStep: 1,
@@ -214,6 +244,8 @@ function init() {
   bindPublishWizard();
   bindProfile();
   bindAuth();
+  bindTermsModal();
+  bindPublicProfileModal();
   bindConfirmModal();
   bindReportModal();
   bindRescheduleModal();
@@ -263,7 +295,13 @@ function bindNavigation() {
   $("#catalog-empty-clear").addEventListener("click", () => {
     clearCatalogFilters();
   });
-  $("#user-chip").addEventListener("click", () => showScreen(state.auth ? "perfil" : "acceso"));
+  $("#user-chip").addEventListener("click", () => {
+    if (!state.auth) {
+      showScreen("acceso");
+      return;
+    }
+    openPublicProfileModal(publicProfileForProducer(currentUserLabel()));
+  });
 }
 
 function openCatalogFilters() {
@@ -389,8 +427,9 @@ function bindForms() {
       setButtonLoading(submitBtn, false);
       closeRequestModal();
       updateBadges();
-      showToast("Solicitud enviada al contratista.");
-      showScreen("reservas");
+      state.offersTab = "solicitudes";
+      showToast("Solicitud enviada. La abrimos en Solicitudes para que puedas probar el flujo.");
+      showScreen("mis-ofertas");
     }, 500);
   });
 
@@ -487,28 +526,55 @@ function priceUnitsForCategory(category) {
   return priceUnitsByCategory[category] || priceUnitsByCategory.default;
 }
 
+function defaultPriceUnitForCategory(category = "") {
+  const cleanCategory = clean(category);
+  const units = priceUnitsForCategory(cleanCategory);
+  const preferred = defaultPriceUnitByCategory[cleanCategory];
+  return units.includes(preferred) ? preferred : units[0] || "hectarea";
+}
+
 function normalizePriceUnit(unit, category = "") {
   const cleanUnit = clean(unit);
-  const units = priceUnitsForCategory(category);
+  const cleanCategory = clean(category);
+  const units = priceUnitsForCategory(cleanCategory);
   if (units.includes(cleanUnit)) return cleanUnit;
-  if (priceUnitMeta[cleanUnit]) return cleanUnit;
-  return units[0] || "hectarea";
+  if (!cleanCategory && priceUnitMeta[cleanUnit]) return cleanUnit;
+  return defaultPriceUnitForCategory(cleanCategory);
+}
+
+function correctedSeedPricing(machine, price, unit) {
+  const correction = seedPricingCorrections[machine?.id];
+  if (!correction) return { price, unit };
+  const rawUnit = clean(machine?.priceUnit || machine?.unidad_precio || machine?.unitPrice);
+  const looksLikeOldSeed = Number(price) === correction.oldPrice && (!rawUnit || rawUnit === "hectarea");
+  return looksLikeOldSeed ? { price: correction.price, unit: correction.priceUnit } : { price, unit };
 }
 
 function normalizeMachinePricing(machine) {
   const category = clean(machine?.category);
+  const rawPrice = Number(machine?.price ?? machine?.precio ?? 0);
+  const rawUnit = clean(machine?.priceUnit || machine?.unidad_precio || machine?.unitPrice);
+  const normalizedUnit = normalizePriceUnit(rawUnit, category);
+  const corrected = correctedSeedPricing(machine, rawPrice, normalizedUnit);
   return {
     ...machine,
-    price: Number(machine?.price ?? machine?.precio ?? 0),
-    precio: Number(machine?.precio ?? machine?.price ?? 0),
-    priceUnit: normalizePriceUnit(machine?.priceUnit || machine?.unidad_precio || machine?.unitPrice || "hectarea", category),
-    unidad_precio: normalizePriceUnit(machine?.unidad_precio || machine?.priceUnit || machine?.unitPrice || "hectarea", category),
+    price: corrected.price,
+    precio: corrected.price,
+    priceUnit: corrected.unit,
+    unidad_precio: corrected.unit,
   };
 }
 
+function machinePricingNeedsMigration(machine) {
+  const normalized = normalizeMachinePricing(machine);
+  return Number(machine.price ?? machine.precio ?? 0) !== normalized.price
+    || Number(machine.precio ?? machine.price ?? 0) !== normalized.precio
+    || machine.priceUnit !== normalized.priceUnit
+    || machine.unidad_precio !== normalized.unidad_precio;
+}
+
 function persistMachinePricingMigration() {
-  const needsMigration = state.machines.some((machine) => !machine.unidad_precio || !machine.priceUnit || machine.precio === undefined);
-  if (!needsMigration) return;
+  if (!state.machines.some(machinePricingNeedsMigration)) return;
   localStorage.setItem(STORAGE_KEYS.machines, JSON.stringify(state.machines.map(normalizeMachinePricing)));
 }
 
@@ -835,7 +901,6 @@ function profileFromForm() {
     hectares: clean(formControl(form, "hectares").value),
     baseLocation: clean(form.elements.baseLocation.value),
     operationRadiusKm: profileOperationRadiusKm(formControl(form, "operationRadiusKm").value),
-    role: state.profile.role || clean(state.auth?.role) || "Productor y contratista",
     bio: clean(form.elements.bio.value),
   };
 }
@@ -894,6 +959,208 @@ function themeLabel(theme) {
   };
   return labels[normalizeTheme(theme)];
 }
+function bindPublicProfileModal() {
+  const modal = $("#public-profile-modal");
+  if (!modal) return;
+  $("#public-profile-close")?.addEventListener("click", closePublicProfileModal);
+  $("#public-profile-view-all")?.addEventListener("click", () => {
+    const target = modal.dataset.profileKind === "contractor" ? "mis-ofertas" : "reservas";
+    closePublicProfileModal();
+    showScreen(target);
+  });
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closePublicProfileModal();
+  });
+  document.addEventListener("click", (e) => {
+    const trigger = e.target.closest(".public-profile-trigger");
+    if (!trigger) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openPublicProfileModal(profileDataFromTrigger(trigger.dataset));
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.hidden) closePublicProfileModal();
+    if (!["Enter", " "].includes(e.key)) return;
+    const trigger = e.target.closest?.(".public-profile-trigger");
+    if (!trigger || trigger.tagName === "BUTTON") return;
+    e.preventDefault();
+    openPublicProfileModal(profileDataFromTrigger(trigger.dataset));
+  });
+}
+
+function profileTrigger({ type, machineId = "", name = "", label = "" }) {
+  const visibleLabel = clean(label || name) || "Usuario Agronex";
+  return `<button class="public-profile-trigger" type="button" data-profile-type="${escapeHTML(type)}" data-profile-machine-id="${escapeHTML(machineId)}" data-profile-name="${escapeHTML(name || visibleLabel)}">${escapeHTML(visibleLabel)}</button>`;
+}
+
+function profileDataFromTrigger(dataset) {
+  if (dataset.profileType === "contractor") {
+    const machine = findMachine(dataset.profileMachineId);
+    return publicProfileForContractor(machine, dataset.profileName);
+  }
+  return publicProfileForProducer(dataset.profileName);
+}
+
+function openPublicProfileModal(profile) {
+  const modal = $("#public-profile-modal");
+  if (!modal || !profile) return;
+  modal.dataset.profileKind = profile.kind;
+  $("#public-profile-avatar").textContent = initialsFor(profile.name);
+  $("#public-profile-type").textContent = profile.typeLabel;
+  $("#public-profile-name").textContent = profile.name;
+  $("#public-profile-meta").textContent = `${profile.location} - Miembro desde ${profile.memberSince}`;
+  renderPublicProfileReputation(profile);
+  renderChipList("#public-profile-specialties", profile.specialties);
+  $("#public-profile-experience").textContent = profile.experience;
+  const machinesSection = $("#public-profile-machines-section");
+  machinesSection.hidden = profile.kind !== "contractor";
+  renderChipList("#public-profile-machines", profile.machines);
+  $("#public-profile-publications-title").textContent = profile.kind === "contractor" ? "Ultimas ofertas" : "Ultimas solicitudes";
+  $("#public-profile-publications").innerHTML = profile.publications.length
+    ? profile.publications.slice(0, 5).map(profilePublicationItem).join("")
+    : `<p class="profile-empty">No hay publicaciones recientes para mostrar.</p>`;
+  $("#public-profile-view-all").hidden = profile.publications.length <= 3;
+  modal.hidden = false;
+}
+
+function closePublicProfileModal() {
+  const modal = $("#public-profile-modal");
+  if (modal) modal.hidden = true;
+}
+
+function renderPublicProfileReputation(profile) {
+  const stats = $("#public-profile-stats");
+  const empty = $("#public-profile-reputation-empty");
+  const hasReputation = profile.stats.some((item) => item.value);
+  empty.hidden = hasReputation;
+  stats.hidden = !hasReputation;
+  stats.innerHTML = hasReputation ? profile.stats.map((item) => `
+    <div class="public-profile-stat">
+      <span>${item.label}</span>
+      <strong>${item.value}</strong>
+    </div>
+  `).join("") : "";
+}
+
+function renderChipList(selector, items) {
+  const target = $(selector);
+  if (!target) return;
+  target.innerHTML = (items || []).length
+    ? items.map((item) => `<span class="profile-chip">${escapeHTML(item)}</span>`).join("")
+    : `<span class="profile-empty">Sin datos cargados.</span>`;
+}
+
+function profilePublicationItem(item) {
+  return `
+    <div class="public-profile-item">
+      <span>${escapeHTML(item.meta)}</span>
+      <strong>${escapeHTML(item.title)}</strong>
+    </div>
+  `;
+}
+
+function publicProfileForContractor(machine, fallbackName = "") {
+  const owner = clean(machine?.owner) || clean(fallbackName) || "Contratista Agronex";
+  const machines = state.machines.filter((item) => clean(item.owner) === owner);
+  const completed = state.reservations.filter((item) => clean(item.owner) === owner && item.status === "done").length;
+  const cancellations = state.reservations.filter((item) => clean(item.owner) === owner && item.status === "rejected").length;
+  const categories = uniqueList(machines.map((item) => item.category));
+  const specialties = uniqueList(machines.map((item) => defaultJobByCategory[item.category]).filter(Boolean));
+  const mainMachine = machine || machines[0];
+  return {
+    kind: "contractor",
+    typeLabel: "Contratista",
+    name: owner,
+    location: clean(mainMachine?.location) || "Zona no informada",
+    memberSince: memberSinceFor(owner),
+    stats: [
+      { label: "Calificacion", value: typeof mainMachine?.rating === "number" ? `${mainMachine.rating.toFixed(1)}/5` : "" },
+      { label: "Trabajos completados", value: completed ? String(completed) : "" },
+      { label: "Respuesta promedio", value: responseTimeFor(owner) },
+      { label: "Cancelaciones", value: cancellations ? String(cancellations) : "" },
+    ],
+    specialties: specialties.length ? specialties : categories,
+    experience: clean(mainMachine?.description) || `${owner} ofrece servicios rurales y maquinaria agricola en ${clean(mainMachine?.location) || "su zona de trabajo"}.`,
+    machines: categories,
+    publications: machines.map((item) => ({ title: item.title, meta: `${item.category} - ${priceDisplay(item)}` })),
+  };
+}
+
+function publicProfileForProducer(name = "") {
+  const producer = clean(name) || currentUserLabel();
+  const requests = state.reservations.filter((item) => clean(item.requestedByName || item.requestedBy) === producer || (!name && item.requestedBy === currentUserId()));
+  const completed = requests.filter((item) => item.status === "done").length;
+  const cancellations = requests.filter((item) => item.status === "rejected").length;
+  const specialties = uniqueList(requests.map((item) => item.job || item.serviceType || defaultJobByCategory[item.category]).filter(Boolean));
+  return {
+    kind: "producer",
+    typeLabel: "Productor",
+    name: producer,
+    location: clean(state.profile.zone) || "Zona no informada",
+    memberSince: memberSinceFor(producer),
+    stats: [
+      { label: "Calificacion", value: "" },
+      { label: "Trabajos completados", value: completed ? String(completed) : "" },
+      { label: "Respuesta promedio", value: requests.length ? "24 h aprox." : "" },
+      { label: "Cancelaciones", value: cancellations ? String(cancellations) : "" },
+    ],
+    specialties: specialties.length ? specialties : ["Siembra", "Cosecha", "Transporte"],
+    experience: clean(state.profile.bio) || `${producer} utiliza Agronex para coordinar trabajos agricolas y maquinaria en su zona.`,
+    machines: [],
+    publications: requests.map((item) => ({ title: item.machineTitle, meta: `${reservationJobLabel(item).replace(/<[^>]*>/g, "")} - ${formatDateRange(item)}` })),
+  };
+}
+
+function initialsFor(name) {
+  return clean(name).split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase() || "AG";
+}
+
+function uniqueList(items) {
+  return Array.from(new Set((items || []).map(clean).filter(Boolean)));
+}
+
+function memberSinceFor(seed) {
+  const year = 2024 + (Math.abs(hashCode(seed || "agronex")) % 3);
+  return String(year);
+}
+
+function responseTimeFor(seed) {
+  const hours = 2 + (Math.abs(hashCode(seed || "respuesta")) % 20);
+  return hours < 12 ? `${hours} h aprox.` : "24 h aprox.";
+}
+function bindTermsModal() {
+  const openBtn = $("#auth-terms-open");
+  const closeBtn = $("#terms-close");
+  const acceptBtn = $("#terms-accept-btn");
+  const modal = $("#terms-modal");
+  if (!modal) return;
+  if (openBtn) openBtn.addEventListener("click", openTermsModal);
+  if (closeBtn) closeBtn.addEventListener("click", closeTermsModal);
+  if (acceptBtn) acceptBtn.addEventListener("click", acceptTermsFromModal);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeTermsModal();
+  });
+}
+
+function openTermsModal() {
+  const modal = $("#terms-modal");
+  if (!modal) return;
+  modal.hidden = false;
+}
+
+function closeTermsModal() {
+  const modal = $("#terms-modal");
+  if (!modal) return;
+  modal.hidden = true;
+}
+
+function acceptTermsFromModal() {
+  const form = $("#auth-form");
+  const termsInput = form ? formControl(form, "termsAccepted") : null;
+  if (termsInput) termsInput.checked = true;
+  hideAuthError();
+  closeTermsModal();
+}
 function bindAuth() {
   const form = $("#auth-form");
   $$(".auth-tab").forEach((btn) => {
@@ -909,7 +1176,7 @@ function bindAuth() {
     const email = clean(formControl(form, "email").value).toLowerCase();
     const name = clean(formControl(form, "name").value);
     const password = clean(formControl(form, "password").value);
-    const role = clean(formControl(form, "role").value) || "Productor";
+    const termsAccepted = Boolean(formControl(form, "termsAccepted")?.checked);
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       showAuthError("Ingresá un email válido.");
@@ -928,19 +1195,24 @@ function bindAuth() {
       return;
     }
 
+    if (mode === "register" && !termsAccepted) {
+      showAuthError("Para crear tu cuenta tenes que aceptar los Terminos y Condiciones de Agronex.");
+      return;
+    }
+
+    const signedInAt = new Date().toISOString();
     state.auth = {
       email,
       password,
       name: mode === "register" ? name : state.profile.name || email.split("@")[0],
-      role: mode === "register" ? role : state.profile.role || "Productor y contratista",
-      signedInAt: new Date().toISOString(),
+      signedInAt,
+      terms: mode === "register" ? { version: TERMS_VERSION, effectiveDate: TERMS_EFFECTIVE_DATE, acceptedAt: signedInAt, url: TERMS_URL } : state.auth?.terms,
     };
 
     if (mode === "register") {
       state.profile = {
         ...state.profile,
         name,
-        role,
       };
       formControl($("#profile-form"), "name").value = name;
       saveProfile();
@@ -1004,15 +1276,20 @@ function render() {
 function renderProfile() {
   const sessionName = state.auth ? clean(state.auth.name) : "";
   const name = clean(state.profile.name) || sessionName || "Mi perfil";
-  const role = clean(state.profile.role) || clean(state.auth?.role) || "Productor y contratista";
   const initials = name.split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase() || "ND";
   $("#profile-avatar").textContent     = initials;
   $("#profile-name-label").textContent = name;
-  $("#profile-role-label").textContent = role;
   $("#profile-zone-label").textContent = clean(state.profile.zone) || "Zona sin cargar";
   $("#profile-hectares-label").textContent = state.profile.hectares ? `${money(state.profile.hectares)} ha` : "Sin cargar";
   $("#profile-radius-label") && ($("#profile-radius-label").textContent = `${profileOperationRadiusKm()} km`);
-  $("#profile-role-value").textContent = role;
+  [$("#profile-avatar"), $("#profile-name-label")].forEach((el) => {
+    if (!el) return;
+    el.classList.add("public-profile-trigger");
+    el.dataset.profileType = "producer";
+    el.dataset.profileName = name;
+    el.tabIndex = 0;
+    el.setAttribute("role", "button");
+  });
   // User chip
   $("#user-chip-avatar").textContent = state.auth ? initials : "ND";
   $("#user-chip-name").textContent   = state.auth ? name.split(" ")[0] : "Iniciar sesion";
@@ -1186,7 +1463,7 @@ function machineCard(machine) {
           <span><i class="fa-solid fa-location-dot"></i>${escapeHTML(machine.location)}${hasDistance ? ` · ${machine.distanceKm} km` : ""}</span>
           <span><i class="fa-regular fa-calendar-check"></i>${escapeHTML(availabilityLabel)}</span>
           <span><i class="fa-solid fa-layer-group"></i>${escapeHTML(availabilityStatus)}</span>
-          <span><i class="fa-solid fa-user-tie"></i>${escapeHTML(machine.owner)}</span>
+          <span><i class="fa-solid fa-user-tie"></i>${profileTrigger({ type: "contractor", machineId: machine.id, label: machine.owner })}</span>
           ${hasRating ? `<span><i class="fa-solid fa-star"></i>${machine.rating.toFixed(1)}${machine.reviews ? ` (${machine.reviews})` : ""}</span>` : ""}
         </div>
         <p class="machine-description">${escapeHTML(machine.description)}</p>
@@ -1216,6 +1493,9 @@ function bindOffersTabs() {
 }
 
 function renderMisOfertas() {
+  $$("#offers-tabs .offers-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === state.offersTab);
+  });
   const myMachines = state.machines;
 
   // Count per tab
@@ -1282,24 +1562,29 @@ function renderMisOfertas() {
 
   // Bind offer action buttons
   $$(".offer-pause-btn").forEach((btn) => btn.addEventListener("click", () => {
-    setOfferStatus(btn.dataset.id, "paused");
-    showToast("Oferta pausada. No aparece en el catálogo hasta que la actives.");
+    if (setOfferStatus(btn.dataset.id, "paused")) {
+      showToast("Oferta pausada. No aparece en el catalogo hasta que la actives.");
+    }
   }));
   $$(".offer-activate-btn").forEach((btn) => btn.addEventListener("click", () => {
-    setOfferStatus(btn.dataset.id, "active");
-    showToast("Oferta activada. Ya aparece en el catálogo.");
+    if (setOfferStatus(btn.dataset.id, "active")) {
+      showToast("Oferta activada. Ya aparece en el catalogo.");
+    }
   }));
   $$(".offer-baja-btn").forEach((btn) => btn.addEventListener("click", () =>
     confirmAction(
       "Dar de baja la oferta",
       `¿Querés dar de baja "${findMachine(btn.dataset.id)?.title}"?`,
       "La oferta dejará de aparecer en el catálogo. Podés reactivarla desde 'Dadas de baja'.",
-      () => { setOfferStatus(btn.dataset.id, "inactive"); showToast("Oferta dada de baja."); },
+      () => { if (setOfferStatus(btn.dataset.id, "inactive")) showToast("Oferta dada de baja."); },
       "Dar de baja"
     )
   ));
-  $$(".slot-status-btn").forEach((btn) => btn.addEventListener("click", () => setAvailabilitySlotStatus(btn.dataset.machineId, btn.dataset.status)));
-  $$(".offer-delete-btn").forEach((btn) => btn.addEventListener("click", () =>
+  $$(".offer-delete-btn").forEach((btn) => btn.addEventListener("click", () => {
+    if (hasPendingRequestsForMachine(btn.dataset.id)) {
+      showToast("Primero acepta o rechaza la solicitud pendiente para eliminar esta oferta.");
+      return;
+    }
     confirmAction(
       "Eliminar definitivamente",
       `¿Eliminar "${findMachine(btn.dataset.id)?.title}" de forma permanente?`,
@@ -1314,11 +1599,13 @@ function renderMisOfertas() {
       },
       "Eliminar"
     )
-  ));
+  }));
 }
 
 function offerCard(machine, tab) {
-  const solicitudesPendientes = state.reservations.filter((r) => r.machineId === machine.id && r.status === "pending").length;
+  const solicitudesPendientes = pendingRequestsForMachine(machine.id).length;
+  const offerChangeLocked = solicitudesPendientes > 0;
+  const offerLockAttr = offerChangeLocked ? 'disabled title="Acepta o rechaza la solicitud pendiente antes de cambiar esta oferta"' : "";
   const reservasTotales       = state.reservations.filter((r) => r.machineId === machine.id).length;
   const icon = categoryIcons[machine.category] || "fa-tractor";
   const statusClass = machine.offerStatus === "active" ? "status-active" : machine.offerStatus === "paused" ? "status-paused" : "status-inactive";
@@ -1326,18 +1613,19 @@ function offerCard(machine, tab) {
   const slot = availabilitySlotForMachine(machine);
   const slotStatus = slot ? availabilitySlotStatusLabel(slot.status) : "Sin ventana flexible";
   const slotStatusClass = slot ? availabilitySlotStatusClass(slot.status) : "status-paused";
-  const slotControls = tab !== "bajas" ? availabilitySlotControls(machine, slot) : "";
 
   const actions = tab === "activas" ? `
     ${solicitudesPendientes > 0 ? `<button class="btn btn-sm warning" disabled><i class="fa-solid fa-inbox"></i> ${solicitudesPendientes} pendiente${solicitudesPendientes > 1 ? "s" : ""}</button>` : ""}
-    <button class="btn btn-sm ghost offer-pause-btn" type="button" data-id="${machine.id}"><i class="fa-solid fa-pause"></i> Pausar</button>
-    <button class="btn btn-sm danger offer-baja-btn" type="button" data-id="${machine.id}"><i class="fa-solid fa-ban"></i> Dar de baja</button>
+    <button class="btn btn-sm ghost offer-pause-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-pause"></i> Pausar</button>
+    <button class="btn btn-sm danger offer-baja-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-ban"></i> Dar de baja</button>
   ` : tab === "pausadas" ? `
-    <button class="btn btn-sm primary offer-activate-btn" type="button" data-id="${machine.id}"><i class="fa-solid fa-play"></i> Activar</button>
-    <button class="btn btn-sm danger offer-baja-btn" type="button" data-id="${machine.id}"><i class="fa-solid fa-ban"></i> Dar de baja</button>
+    ${solicitudesPendientes > 0 ? `<button class="btn btn-sm warning" disabled><i class="fa-solid fa-inbox"></i> ${solicitudesPendientes} pendiente${solicitudesPendientes > 1 ? "s" : ""}</button>` : ""}
+    <button class="btn btn-sm primary offer-activate-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-play"></i> Activar</button>
+    <button class="btn btn-sm danger offer-baja-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-ban"></i> Dar de baja</button>
   ` : `
-    <button class="btn btn-sm ghost offer-activate-btn" type="button" data-id="${machine.id}"><i class="fa-solid fa-rotate-left"></i> Reactivar</button>
-    <button class="btn btn-sm danger offer-delete-btn" type="button" data-id="${machine.id}"><i class="fa-solid fa-trash"></i> Eliminar</button>
+    ${solicitudesPendientes > 0 ? `<button class="btn btn-sm warning" disabled><i class="fa-solid fa-inbox"></i> ${solicitudesPendientes} pendiente${solicitudesPendientes > 1 ? "s" : ""}</button>` : ""}
+    <button class="btn btn-sm ghost offer-activate-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-rotate-left"></i> Reactivar</button>
+    <button class="btn btn-sm danger offer-delete-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-trash"></i> Eliminar</button>
   `;
 
   return `
@@ -1357,33 +1645,12 @@ function offerCard(machine, tab) {
           <span><i class="fa-solid fa-layer-group"></i><strong class="status-pill ${slotStatusClass}">${escapeHTML(slotStatus)}</strong></span>
           ${reservasTotales > 0 ? `<span><i class="fa-solid fa-inbox"></i>${reservasTotales} reserva${reservasTotales > 1 ? "s" : ""}</span>` : ""}
         </div>
-        <div class="availability-window-actions">${slotControls}</div>
         <div class="offer-actions">${actions}</div>
       </div>
     </div>
   `;
 }
 
-function solicitudSummary(reservation) {
-  const quantity = reservationQuantityLabel(reservation);
-  if (reservation.requestMode === "truck" || reservation.category === "Camion") {
-    return `${formatDate(reservation.date)} - ${escapeHTML(reservation.cargoType || "Carga")} - ${quantity}`;
-  }
-  if (reservation.requestMode === "harvest" || reservation.category === "Cosechadora") {
-    return `${formatDate(reservation.date)} - ${quantity} - ${escapeHTML(reservation.crop || "Cultivo")}`;
-  }
-  if (reservation.requestMode === "bagger" || reservation.category === "Embolsadora") {
-    return `${formatDate(reservation.date)} - ${escapeHTML(reservation.grainType || "Grano")} - ${quantity}`;
-  }
-  return `${formatDateRange(reservation)} - ${quantity} - ${escapeHTML(reservation.job)}`;
-}
-
-function solicitudLocationSummary(reservation) {
-  if (reservation.requestMode === "truck" || reservation.category === "Camion") {
-    return `${escapeHTML(reservation.origin || "Origen a confirmar")} -> ${escapeHTML(reservation.destination || "Destino a confirmar")}`;
-  }
-  return escapeHTML(reservation.field || "Ubicacion a confirmar");
-}
 function solicitudCard(reservation) {
   return `
     <div class="offer-solicitud-card">
@@ -1408,7 +1675,7 @@ function solicitudCard(reservation) {
   `;
 }
 
-function solicitudLogisticsPanel(reservation) {
+function solicitudLogisticsPanel(reservation, viewContext = "contractor") {
   const workLocation = reservationWorkLocation(reservation);
   const route = reservationRouteInfo(reservation, workLocation);
   const duration = reservationDurationLabel(reservation);
@@ -1416,6 +1683,7 @@ function solicitudLogisticsPanel(reservation) {
   const economicContext = reservationEconomicContext(reservation);
   const map = workLocation ? logisticsMapMarkup(workLocation, reservation) : logisticsMapFallback();
   const payment = formatEstimatedMoney(economicContext?.estimate?.estimatedValue);
+  const accountCard = reservationAccountCard(reservation, viewContext);
   return `
     <section class="solicitud-decision" aria-label="Resumen ejecutivo de la solicitud">
       <div class="solicitud-exec-grid">
@@ -1426,17 +1694,16 @@ function solicitudLogisticsPanel(reservation) {
         ${executiveInfoCard("fa-solid fa-tractor", "Trabajo", reservationJobLabel(reservation))}
       </div>
       <details class="solicitud-more">
-        <summary><span>M&aacute;s informaci&oacute;n</span><i class="fa-solid fa-chevron-down"></i></summary>
+        <summary><span class="solicitud-more-label"></span><i class="fa-solid fa-chevron-down"></i></summary>
         <div class="solicitud-more-body">
           <div class="solicitud-more-inner">
             <div class="solicitud-logistics-head">
               <span><i class="fa-solid fa-route"></i> Detalle logistico</span>
-              ${route.googleMapsUrl ? `<a class="btn btn-sm ghost" href="${route.googleMapsUrl}" target="_blank" rel="noopener"><i class="fa-solid fa-diamond-turn-right"></i> Ver ruta</a>` : ""}
             </div>
             <div class="solicitud-logistics-grid">
-              ${logisticInfoCard("fa-solid fa-user", "Cuenta solicitante", reservationRequesterLabel(reservation))}
+              ${accountCard}
               ${logisticInfoCard("fa-solid fa-location-dot", "Ubicacion", reservationLocationLabel(reservation))}
-              ${logisticInfoCard("fa-regular fa-clock", "Tiempo de viaje", route.timeLabel)}
+              ${logisticTravelCard(route.timeLabel, route.googleMapsUrl)}
               ${duration ? logisticInfoCard("fa-solid fa-hourglass-half", "Tiempo de trabajo", duration) : ""}
               ${logisticInfoCard("fa-solid fa-calculator", "Cantidad", escapeHTML(reservationQuantityLabel(reservation)))}
             </div>
@@ -1462,6 +1729,19 @@ function executiveInfoCard(icon, label, value) {
   `;
 }
 
+function logisticTravelCard(timeLabel, routeUrl) {
+  const routeAction = routeUrl ? `<a class="solicitud-travel-action" href="${routeUrl}" target="_blank" rel="noopener"><i class="fa-solid fa-diamond-turn-right"></i> Ver ruta</a>` : "";
+  return `
+    <div class="solicitud-logistic-card solicitud-travel-card">
+      <i class="fa-regular fa-clock"></i>
+      <div>
+        <span>Tiempo de viaje</span>
+        <strong>${timeLabel}</strong>
+        ${routeAction}
+      </div>
+    </div>
+  `;
+}
 function logisticInfoCard(icon, label, value) {
   return `
     <div class="solicitud-logistic-card">
@@ -1523,8 +1803,21 @@ function formatDurationMinutes(minutes) {
   return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
-function reservationRequesterLabel(reservation) {
-  return escapeHTML(clean(reservation.requestedByName) || clean(reservation.requestedBy) || "Productor sin identificar");
+function reservationAccountCard(reservation, viewContext = "contractor") {
+  if (viewContext === "producer") {
+    return logisticInfoCard("fa-solid fa-user-tie", "Contratista", profileTrigger({ type: "contractor", machineId: reservation.machineId, label: reservationContractorLabel(reservation, false) }));
+  }
+  return logisticInfoCard("fa-solid fa-user", "Cuenta solicitante", profileTrigger({ type: "producer", name: reservationRequesterLabel(reservation, false), label: reservationRequesterLabel(reservation, false) }));
+}
+
+function reservationContractorLabel(reservation, escaped = true) {
+  const machine = findMachine(reservation.machineId);
+  const label = clean(reservation.owner) || clean(machine?.owner) || "Contratista sin identificar";
+  return escaped ? escapeHTML(label) : label;
+}
+function reservationRequesterLabel(reservation, escaped = true) {
+  const label = clean(reservation.requestedByName) || clean(reservation.requestedBy) || "Productor sin identificar";
+  return escaped ? escapeHTML(label) : label;
 }
 
 function reservationWorkLocation(reservation) {
@@ -1652,29 +1945,27 @@ function logisticsMapFallback() {
     </div>
   `;
 }
+function pendingRequestsForMachine(machineId) {
+  return state.reservations.filter((r) => r.machineId === machineId && r.status === "pending");
+}
+
+function hasPendingRequestsForMachine(machineId) {
+  return pendingRequestsForMachine(machineId).length > 0;
+}
+
 function setOfferStatus(machineId, status) {
   const machine = findMachine(machineId);
-  if (!machine) return;
+  if (!machine) return false;
+  if (status !== machine.offerStatus && hasPendingRequestsForMachine(machineId)) {
+    showToast("Primero acepta o rechaza la solicitud pendiente para cambiar esta oferta.");
+    return false;
+  }
   machine.offerStatus = status;
   saveMachines();
   renderMisOfertas();
   renderCatalog();
   renderCategoryFilters();
-}
-
-function availabilitySlotControls(machine, slot) {
-  if (!slot) return "";
-  const statuses = [
-    { status: "available", icon: "fa-circle-check", label: "Libre" },
-    { status: "partially_booked", icon: "fa-circle-half-stroke", label: "Parcial" },
-    { status: "unavailable", icon: "fa-lock", label: "Cerrar ventana" },
-  ];
-  return statuses.map((item) => `
-    <button class="btn btn-sm ghost slot-status-btn ${slot.status === item.status ? "active" : ""}" type="button"
-      data-machine-id="${escapeHTML(machine.id)}" data-status="${item.status}">
-      <i class="fa-solid ${item.icon}"></i> ${item.label}
-    </button>
-  `).join("");
+  return true;
 }
 
 function setAvailabilitySlotStatus(machineId, status) {
@@ -1696,7 +1987,7 @@ function markAvailabilitySlotPartiallyBooked(machineId) {
 /* ─── RESERVAS ─── */
 function renderReservations() {
   const list  = $("#reservations-list");
-  const note  = $("#reservas-role-note");
+  const note  = $("#reservas-note");
   note.textContent = "Aquí ves tus solicitudes como productor y las que recibís como contratista.";
 
   const hasReservations = state.reservations.length > 0;
@@ -1737,8 +2028,8 @@ function reservationCard(reservation) {
   const machine = findMachine(reservation.machineId);
   const icon = categoryIcons[reservation.category] || categoryIcons[machine?.category] || "fa-tractor";
   const requestCode = reservationCode(reservation);
-  const urgency = formatUrgency(reservation.urgency) || "Media";
-  const economicContext = reservationEconomicContext(reservation);
+  const equipmentMarkup = reservationEquipmentMarkup(reservation, machine);
+  const actionsMarkup = reservationActionsMarkup(reservation, { canResolve, canStartWork, canFinishWork, canDeleteFinished, canRequestReschedule, canReportDelay });
 
   return `
     <article class="reservation-card">
@@ -1747,7 +2038,7 @@ function reservationCard(reservation) {
           <span class="reservation-machine-icon"><i class="fa-solid ${icon}"></i></span>
           <div>
             <h3>${escapeHTML(reservation.machineTitle)}</h3>
-            <p>${escapeHTML(reservation.owner)} <span>�</span> Solicitud ${formatDate(reservation.createdAt)} <span>�</span> ID: ${requestCode}</p>
+            <p>${profileTrigger({ type: "contractor", machineId: reservation.machineId, label: reservation.owner })} - Solicitud ${formatDate(reservation.createdAt)} - ID: ${requestCode}</p>
           </div>
         </div>
         <div class="reservation-head-actions">
@@ -1757,76 +2048,72 @@ function reservationCard(reservation) {
           </button>
         </div>
       </div>
-      ${canResolve ? "" : `
-        <div class="reservation-grid">
-          ${reservationMetrics(reservation)}
-        </div>
-      `}
-      ${canResolve ? solicitudLogisticsPanel(reservation) : ""}
+      ${solicitudLogisticsPanel(reservation, "producer")}
       ${reservationStatusTrack(reservation)}
       ${rescheduleSection(reservation)}
       ${delaySection(reservation)}
-      <div class="reservation-equipment">
-        <i class="fa-solid fa-truck-pickup"></i>
-        <div>
-          <strong>${machinePlate(reservation) ? `Patente: ${escapeHTML(machinePlate(reservation))}` : "Sin patente registrada"}</strong>
-          <span>${escapeHTML(machine?.brand || reservation.machineTitle)}</span>
-        </div>
-      </div>
-      ${canResolve ? `
-        <div class="reservation-actions">
-          <button class="btn ghost reject-reservation" type="button"
-            data-reservation-id="${reservation.id}"
-            data-title="${escapeHTML(reservation.machineTitle)}"
-            data-date="${reservation.date}">
-            <i class="fa-solid fa-xmark"></i> Rechazar
-          </button>
-          <button class="btn primary accept-reservation" type="button" data-reservation-id="${reservation.id}">
-            <i class="fa-solid fa-check"></i> Aceptar
-          </button>
-        </div>
-      ` : ""}
-      ${canReportDelay ? `
-        <div class="reservation-actions">
-          <button class="btn ghost open-delay-btn" type="button" data-reservation-id="${reservation.id}">
-            <i class="fa-regular fa-clock"></i> Reportar retraso
-          </button>
-        </div>
-      ` : ""}
-      ${canRequestReschedule ? `
-        <div class="reservation-actions">
-          <button class="btn ghost open-reschedule-btn" type="button" data-reservation-id="${reservation.id}">
-            <i class="fa-regular fa-calendar-plus"></i> Solicitar reprogramacion
-          </button>
-        </div>
-      ` : ""}
-      ${canStartWork ? `
-        <div class="reservation-actions">
-          <button class="btn primary start-work-reservation" type="button" data-reservation-id="${reservation.id}">
-            <i class="fa-solid fa-play"></i> Iniciar trabajo
-          </button>
-        </div>
-      ` : ""}
-      ${canFinishWork ? `
-        <div class="reservation-actions">
-          <button class="btn primary finish-work-reservation" type="button" data-reservation-id="${reservation.id}">
-            <i class="fa-solid fa-flag-checkered"></i> Marcar finalizado
-          </button>
-        </div>
-      ` : ""}
-      ${canDeleteFinished ? `
-        <div class="reservation-actions">
-          <button class="btn danger delete-finished-reservation" type="button"
-            data-reservation-id="${reservation.id}"
-            data-title="${escapeHTML(reservation.machineTitle)}">
-            <i class="fa-solid fa-trash"></i> Eliminar reserva
-          </button>
-        </div>
-      ` : ""}
+      ${equipmentMarkup}
+      ${actionsMarkup}
     </article>
   `;
 }
 
+function reservationActionsMarkup(reservation, flags) {
+  const actions = [];
+  if (flags.canResolve) {
+    actions.push(`
+      <button class="btn ghost reject-reservation" type="button"
+        data-reservation-id="${reservation.id}"
+        data-title="${escapeHTML(reservation.machineTitle)}"
+        data-date="${reservation.date}">
+        <i class="fa-solid fa-xmark"></i> Rechazar
+      </button>
+    `);
+    actions.push(`
+      <button class="btn primary accept-reservation" type="button" data-reservation-id="${reservation.id}">
+        <i class="fa-solid fa-check"></i> Aceptar
+      </button>
+    `);
+  }
+  if (flags.canReportDelay) {
+    actions.push(`
+      <button class="btn ghost open-delay-btn" type="button" data-reservation-id="${reservation.id}">
+        <i class="fa-regular fa-clock"></i> Reportar retraso
+      </button>
+    `);
+  }
+  if (flags.canRequestReschedule) {
+    actions.push(`
+      <button class="btn ghost open-reschedule-btn" type="button" data-reservation-id="${reservation.id}">
+        <i class="fa-regular fa-calendar-plus"></i> Solicitar reprogramacion
+      </button>
+    `);
+  }
+  if (flags.canStartWork) {
+    actions.push(`
+      <button class="btn primary start-work-reservation" type="button" data-reservation-id="${reservation.id}">
+        <i class="fa-solid fa-play"></i> Iniciar trabajo
+      </button>
+    `);
+  }
+  if (flags.canFinishWork) {
+    actions.push(`
+      <button class="btn primary finish-work-reservation" type="button" data-reservation-id="${reservation.id}">
+        <i class="fa-solid fa-flag-checkered"></i> Marcar finalizado
+      </button>
+    `);
+  }
+  if (flags.canDeleteFinished) {
+    actions.push(`
+      <button class="btn danger delete-finished-reservation" type="button"
+        data-reservation-id="${reservation.id}"
+        data-title="${escapeHTML(reservation.machineTitle)}">
+        <i class="fa-solid fa-trash"></i> Eliminar reserva
+      </button>
+    `);
+  }
+  return actions.length ? `<div class="reservation-actions">${actions.join("")}</div>` : "";
+}
 function delaySection(reservation) {
   const delays = delayHistoryFor(reservation.id);
   if (delays.length === 0) return "";
@@ -1892,8 +2179,8 @@ function rescheduleSection(reservation) {
 function reschedulePendingMarkup(request) {
   return `
     <div class="reschedule-item">
-      <strong>${formatDateRangeValues(request.proposedStart, request.proposedEnd)}</strong>
-      <small>Pedido por ${escapeHTML(request.requestedByName || request.requestedBy)}. Fecha actual: ${formatDateRangeValues(request.oldStart, request.oldEnd)}.</small>
+      <strong>${formatDateTimeRangeValues(request.proposedStart, request.proposedEnd, request.proposedStartTime, request.proposedEndTime)}</strong>
+      <small>Pedido por ${profileTrigger({ type: "producer", name: request.requestedByName || request.requestedBy, label: request.requestedByName || request.requestedBy })}. Fecha actual: ${formatDateTimeRangeValues(request.oldStart, request.oldEnd, request.oldStartTime, request.oldEndTime)}.</small>
       ${request.reason ? `<small>Motivo: ${escapeHTML(request.reason)}</small>` : ""}
       <div class="reschedule-actions">
         <button class="btn btn-sm ghost reject-reschedule-btn" type="button" data-reschedule-id="${request.id}">
@@ -1910,7 +2197,7 @@ function reschedulePendingMarkup(request) {
 function rescheduleHistoryItem(request) {
   return `
     <div class="reschedule-item">
-      <strong>${formatDateRangeValues(request.proposedStart, request.proposedEnd)}</strong>
+      <strong>${formatDateTimeRangeValues(request.proposedStart, request.proposedEnd, request.proposedStartTime, request.proposedEndTime)}</strong>
       <small>${rescheduleStatusLabel(request.status)} � pedido por ${escapeHTML(request.requestedByName || request.requestedBy)}</small>
       ${request.reason ? `<small>Motivo: ${escapeHTML(request.reason)}</small>` : ""}
     </div>
@@ -1936,6 +2223,23 @@ function formatDateRangeValues(start, end) {
   const formattedStart = formatDate(start);
   if (!end || end === start) return formattedStart;
   return `${formattedStart} al ${formatDate(end)}`;
+}
+
+function formatDateTimeRangeValues(start, end, startTime = "", endTime = "") {
+  const formattedStart = formatDate(start);
+  const formattedEnd = formatDate(end || start);
+  const cleanStartTime = clean(startTime);
+  const cleanEndTime = clean(endTime);
+  if (!end || end === start) {
+    if (cleanStartTime && cleanEndTime && cleanStartTime !== cleanEndTime) {
+      return `${formattedStart} de ${cleanStartTime} a ${cleanEndTime} hs`;
+    }
+    if (cleanStartTime) return `${formattedStart} ${cleanStartTime} hs`;
+    return formattedStart;
+  }
+  const startLabel = cleanStartTime ? `${formattedStart} ${cleanStartTime} hs` : formattedStart;
+  const endLabel = cleanEndTime ? `${formattedEnd} ${cleanEndTime} hs` : formattedEnd;
+  return `${startLabel} al ${endLabel}`;
 }
 function reservationStatusTrack(reservation) {
   const status = typeof reservation === "string" ? reservation : reservation.status;
@@ -2037,6 +2341,19 @@ function reservationCode(reservation) {
   return `#ND-${year}-${String(Math.abs(hashCode(reservation.id || reservation.machineId)) % 10000).padStart(4, "0")}`;
 }
 
+function reservationEquipmentMarkup(reservation, machine = findMachine(reservation.machineId)) {
+  const plate = machinePlate(reservation);
+  if (!plate) return "";
+  return `
+    <div class="reservation-equipment">
+      <i class="fa-solid fa-id-card"></i>
+      <div>
+        <strong>Patente: ${escapeHTML(plate)}</strong>
+        <span>${escapeHTML(machine?.brand || reservation.machineTitle)}</span>
+      </div>
+    </div>
+  `;
+}
 function machinePlate(reservation) {
   const machine = findMachine(reservation.machineId);
   return normalizePlate(machine?.plate || reservation.plate || "");
@@ -2155,8 +2472,10 @@ function openRescheduleModal(reservationId) {
   form.reset();
   formControl(form, "reservationId").value = reservation.id;
   formControl(form, "proposedStart").value = reservation.date || "";
+  formControl(form, "proposedStartTime").value = reservation.startTime || "08:00";
   formControl(form, "proposedEnd").value = reservation.dateEnd || reservation.date || "";
-  $("#reschedule-current-range").textContent = `Fecha actual: ${formatDateRangeValues(reservation.date, reservation.dateEnd || reservation.date)}`;
+  formControl(form, "proposedEndTime").value = reservation.endTime || reservation.startTime || "18:00";
+  $("#reschedule-current-range").textContent = `Fecha actual: ${formatDateTimeRangeValues(reservation.date, reservation.dateEnd || reservation.date, reservation.startTime, reservation.endTime)}`;
   hideRescheduleError();
   $("#reschedule-modal").hidden = false;
   formControl(form, "proposedStart").focus();
@@ -2179,12 +2498,26 @@ function submitRescheduleRequest(e) {
   }
   const proposedStart = formControl(form, "proposedStart").value;
   const proposedEnd = formControl(form, "proposedEnd").value || proposedStart;
+  const proposedStartTime = formControl(form, "proposedStartTime").value;
+  const proposedEndTime = formControl(form, "proposedEndTime").value;
   if (!proposedStart) {
     showRescheduleError("Elegi una nueva fecha de inicio.");
     return;
   }
+  if (!proposedStartTime) {
+    showRescheduleError("Elegi un horario de inicio.");
+    return;
+  }
+  if (!proposedEndTime) {
+    showRescheduleError("Elegi un horario de fin.");
+    return;
+  }
   if (proposedEnd < proposedStart) {
     showRescheduleError("La fecha fin propuesta no puede ser anterior al inicio.");
+    return;
+  }
+  if (proposedEnd === proposedStart && proposedEndTime <= proposedStartTime) {
+    showRescheduleError("El horario de fin debe ser posterior al horario de inicio.");
     return;
   }
   state.rescheduleRequests.unshift({
@@ -2194,8 +2527,12 @@ function submitRescheduleRequest(e) {
     requestedByName: currentUserLabel(),
     oldStart: reservation.date,
     oldEnd: reservation.dateEnd || reservation.date,
+    oldStartTime: reservation.startTime || "",
+    oldEndTime: reservation.endTime || reservation.startTime || "",
     proposedStart,
     proposedEnd,
+    proposedStartTime,
+    proposedEndTime,
     status: "pending",
     reason: clean(formControl(form, "reason").value),
     createdAt: new Date().toISOString(),
@@ -2215,6 +2552,8 @@ function acceptRescheduleRequest(id) {
   request.resolvedAt = new Date().toISOString();
   reservation.date = request.proposedStart;
   reservation.dateEnd = request.proposedEnd && request.proposedEnd !== request.proposedStart ? request.proposedEnd : "";
+  reservation.startTime = request.proposedStartTime || "";
+  reservation.endTime = request.proposedEndTime || request.proposedStartTime || "";
   if (reservation.status === "pending") reservation.status = "accepted";
   reservation.rescheduledAt = request.resolvedAt;
   saveReservations();

@@ -88,7 +88,7 @@
         </div>
       </div>
 
-      <div class="role-note" id="reservas-role-note"></div>
+      <div class="flow-note" id="reservas-note"></div>
       <div class="reservations-list" id="reservations-list"></div>
       <div class="empty-state" id="reservations-empty" hidden>
         <i class="fa-regular fa-calendar"></i>
@@ -284,12 +284,10 @@
         <aside class="profile-sidebar-card anim-card">
           <div class="profile-avatar" id="profile-avatar">ND</div>
           <h2 id="profile-name-label">Mi perfil</h2>
-          <p id="profile-role-label">Productor y contratista</p>
           <div class="profile-op-rows">
             <div><span>Zona</span><strong id="profile-zone-label">Pergamino, Buenos Aires</strong></div>
             <div><span>Hectareas</span><strong id="profile-hectares-label">120 ha</strong></div>
             <div><span>Radio</span><strong id="profile-radius-label">80 km</strong></div>
-            <div><span>Rol</span><strong id="profile-role-value">Productor y contratista</strong></div>
           </div>
         </aside>
 
@@ -397,14 +395,16 @@
             <span>Contraseña</span>
             <input name="password" type="password" maxlength="80" placeholder="Ingresá tu contraseña">
           </label>
-          <label class="full-field auth-register-field">
-            <span>Rol principal</span>
-            <select name="role">
-              <option value="Productor">Productor</option>
-              <option value="Contratista">Contratista</option>
-              <option value="Productor y contratista">Productor y contratista</option>
-            </select>
-          </label>
+          <div class="terms-consent auth-register-field">
+            <label>
+              <input name="termsAccepted" type="checkbox">
+              <span>Acepto los Terminos y Condiciones de Uso de Agronex.</span>
+            </label>
+            <button class="link-button" type="button" id="auth-terms-open">
+              Ver terminos completos
+            </button>
+            <small>Version 1.0 vigente desde el 11 de junio de 2026.</small>
+          </div>
           <p class="form-error" id="auth-error" role="alert" hidden></p>
           <div class="form-actions">
             <button class="btn primary" type="submit" id="auth-submit">
@@ -417,6 +417,86 @@
 
   </main>
 
+  <!-- MODAL PERFIL PUBLICO -->
+  <div class="modal-backdrop" id="public-profile-modal" hidden>
+    <div class="modal public-profile-modal" role="dialog" aria-modal="true" aria-labelledby="public-profile-name">
+      <div class="modal-head public-profile-head">
+        <div class="public-profile-identity">
+          <div class="public-profile-avatar" id="public-profile-avatar">AG</div>
+          <div>
+            <p class="eyebrow" id="public-profile-type">Perfil</p>
+            <h2 id="public-profile-name">Usuario Agronex</h2>
+            <p id="public-profile-meta">Ubicacion no informada</p>
+          </div>
+        </div>
+        <button class="icon-btn" type="button" id="public-profile-close" aria-label="Cerrar perfil">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="public-profile-body">
+        <section class="public-profile-section">
+          <h3>Reputacion</h3>
+          <p class="profile-empty" id="public-profile-reputation-empty" hidden>Sin suficientes operaciones para calcular la reputacion.</p>
+          <div class="public-profile-stats" id="public-profile-stats"></div>
+        </section>
+
+        <section class="public-profile-section" id="public-profile-specialties-section">
+          <h3>Especialidades</h3>
+          <div class="profile-chip-list" id="public-profile-specialties"></div>
+        </section>
+
+        <section class="public-profile-section">
+          <h3>Experiencia</h3>
+          <p class="public-profile-text" id="public-profile-experience">Sin descripcion cargada.</p>
+        </section>
+
+        <section class="public-profile-section" id="public-profile-machines-section">
+          <div class="public-profile-section-head">
+            <h3>Maquinaria</h3>
+          </div>
+          <div class="profile-chip-list" id="public-profile-machines"></div>
+        </section>
+
+        <section class="public-profile-section">
+          <div class="public-profile-section-head">
+            <h3 id="public-profile-publications-title">Publicaciones</h3>
+            <button class="link-button" type="button" id="public-profile-view-all">Ver todas</button>
+          </div>
+          <div class="public-profile-list" id="public-profile-publications"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL TERMINOS -->
+  <div class="modal-backdrop" id="terms-modal" hidden>
+    <div class="modal legal-modal" role="dialog" aria-modal="true" aria-labelledby="terms-title">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Documento legal</p>
+          <h2 id="terms-title">Terminos y Condiciones</h2>
+        </div>
+        <button class="icon-btn" type="button" id="terms-close" aria-label="Cerrar terminos">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <p class="legal-intro">
+        Para crear una cuenta en Agronex tenes que leer y aceptar los Terminos y Condiciones de Uso.
+      </p>
+      <div class="legal-viewer">
+        <iframe src="legal/terminos-agronex.html" title="Terminos y Condiciones de Uso de Agronex"></iframe>
+      </div>
+      <div class="form-actions">
+        <a class="btn ghost" href="legal/terminos-agronex.html" target="_blank" rel="noopener">
+          <i class="fa-solid fa-up-right-from-square"></i> Abrir en nueva pestana
+        </a>
+        <button class="btn primary" type="button" id="terms-accept-btn">
+          <i class="fa-solid fa-check"></i> Aceptar y continuar
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL FILTROS CATALOGO -->
   <div class="modal-backdrop" id="catalog-filters-modal" hidden>
@@ -755,8 +835,16 @@
           <input name="proposedStart" type="date" required>
         </label>
         <label>
+          <span>Horario inicio</span>
+          <input name="proposedStartTime" type="time" required>
+        </label>
+        <label>
           <span>Nueva fecha fin</span>
           <input name="proposedEnd" type="date" required>
+        </label>
+        <label>
+          <span>Horario fin</span>
+          <input name="proposedEndTime" type="time" required>
         </label>
       </div>
       <label class="full-field">
