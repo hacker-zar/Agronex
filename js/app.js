@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   reschedules: "nexudrive_mvp_reschedules",
   delays: "nexudrive_mvp_delays",
   availabilitySlots: "nexudrive_mvp_availability_slots",
+  notifications: "nexudrive_mvp_notifications",
   auth: "nexudrive_mvp_auth",
   theme: "nexudrive_mvp_theme",
 };
@@ -215,6 +216,7 @@ const state = {
   rescheduleRequests: readJSON(STORAGE_KEYS.reschedules, []),
   delayRecords: readJSON(STORAGE_KEYS.delays, []),
   availabilitySlots: readJSON(STORAGE_KEYS.availabilitySlots, []),
+  notifications: readJSON(STORAGE_KEYS.notifications, []),
   auth:         readObject(STORAGE_KEYS.auth, null),
   theme:        normalizeTheme(localStorage.getItem(STORAGE_KEYS.theme)),
   profile:      readObject("nexudrive_mvp_profile", {
@@ -230,6 +232,10 @@ const state = {
 
 // Pending confirm action
 let pendingAction = null;
+let notificationToastTimer = null;
+let notificationGroupTimer = null;
+let notificationToastQueue = [];
+let lastUserActivityAt = Date.now();
 const locationPickerState = { map: null, marker: null, form: null, selected: null, operationCircle: null, operationCenterMarker: null, operationCenter: null };
 
 const $ = (sel) => document.querySelector(sel);
@@ -246,6 +252,9 @@ function init() {
   bindAuth();
   bindTermsModal();
   bindPublicProfileModal();
+  bindNotificationCenter();
+  bindPresenceTracking();
+  registerNotificationServiceWorker();
   bindConfirmModal();
   bindReportModal();
   bindRescheduleModal();
@@ -422,8 +431,10 @@ function bindForms() {
     setButtonLoading(submitBtn, true, "Enviando...");
 
     setTimeout(() => {
-      state.reservations.unshift(reservationFromForm(formEl, machine));
+      const reservation = reservationFromForm(formEl, machine);
+      state.reservations.unshift(reservation);
       saveReservations();
+      emitAppEvent("job.created", { reservation, machine });
       setButtonLoading(submitBtn, false);
       closeRequestModal();
       updateBadges();
@@ -1270,6 +1281,7 @@ function render() {
   renderProfile();
   syncThemeControls();
   renderPublishStep();
+  renderNotifications();
   updateBadges();
 }
 
@@ -2611,6 +2623,8 @@ function setReservationStatus(id, status) {
   res.resolvedAt = new Date().toISOString();
   if (status === "accepted") markAvailabilitySlotPartiallyBooked(res.machineId);
   saveReservations();
+  if (status === "accepted") emitAppEvent("job.accepted", { reservation: res });
+  if (status === "rejected") emitAppEvent("job.cancelled", { reservation: res });
   renderReservations();
   renderMisOfertas();
   updateBadges();
@@ -3596,6 +3610,344 @@ function bindConfirmModal() {
 }
 
 /* ─── BADGES ─── */
+/* NOTIFICACIONES */
+function bindNotificationCenter() {
+  $("#notification-toggle")?.addEventListener("click", toggleNotificationCenter);
+  $("#notification-close")?.addEventListener("click", closeNotificationCenter);
+  $("#notification-backdrop")?.addEventListener("click", closeNotificationCenter);
+  $("#notification-mark-read")?.addEventListener("click", markAllNotificationsRead);
+  $("#notification-permission")?.addEventListener("click", requestBrowserNotificationPermission);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && isNotificationCenterOpen()) closeNotificationCenter();
+  });
+}
+
+function bindPresenceTracking() {
+  ["click", "keydown", "mousemove", "touchstart", "scroll"].forEach((eventName) => {
+    window.addEventListener(eventName, () => { lastUserActivityAt = Date.now(); }, { passive: true });
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) renderNotifications();
+  });
+}
+
+function registerNotificationServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "NEXUDRIVE_NOTIFICATION_CLICK") openNotificationDetail(event.data.notification?.id);
+  });
+}
+
+function emitAppEvent(eventName, payload = {}) {
+  const notification = notificationFromEvent(eventName, payload);
+  if (!notification) return null;
+  return createNotification(notification);
+}
+
+function notificationFromEvent(eventName, payload) {
+  const reservation = payload.reservation || {};
+  const machine = payload.machine || findMachine(reservation.machineId) || {};
+  const machineTitle = clean(reservation.machineTitle || machine.title || "Trabajo");
+  const requester = clean(reservation.requestedByName || reservation.requestedBy || currentUserLabel());
+  if (eventName === "job.created") {
+    return {
+      user_id: currentUserId(),
+      type: "job_request",
+      title: "Nueva solicitud de trabajo",
+      body: `${requester} solicito ${machineTitle}. Revisala antes de cambiar la oferta.`,
+      priority: "HIGH",
+      related_id: reservation.id,
+    };
+  }
+  if (eventName === "job.accepted") {
+    return {
+      user_id: currentUserId(),
+      type: "job_accepted",
+      title: "Solicitud aceptada",
+      body: `${machineTitle} fue aceptada y ya figura en tus reservas.`,
+      priority: "MEDIUM",
+      related_id: reservation.id,
+    };
+  }
+  if (eventName === "job.cancelled") {
+    return {
+      user_id: currentUserId(),
+      type: "job_cancelled",
+      title: "Solicitud rechazada",
+      body: `${machineTitle} fue rechazada. La fecha original no cambia.`,
+      priority: "HIGH",
+      related_id: reservation.id,
+    };
+  }
+  if (eventName === "message.created") {
+    return {
+      user_id: currentUserId(),
+      type: "message",
+      title: payload.title || "Nuevo mensaje",
+      body: payload.body || "Tenes un mensaje nuevo en la conversacion.",
+      priority: payload.priority || "LOW",
+      related_id: payload.related_id || null,
+    };
+  }
+  return null;
+}
+
+function createNotification(input) {
+  const notification = {
+    id: notificationId(),
+    user_id: clean(input.user_id) || currentUserId(),
+    type: clean(input.type) || "system",
+    title: clean(input.title) || "Nueva notificacion",
+    body: clean(input.body),
+    priority: normalizeNotificationPriority(input.priority),
+    read: false,
+    created_at: new Date().toISOString(),
+    related_id: clean(input.related_id),
+  };
+  state.notifications.unshift(notification);
+  state.notifications = state.notifications.slice(0, 80);
+  saveNotifications();
+  handleIncomingNotification(notification);
+  return notification;
+}
+
+function handleIncomingNotification(notification) {
+  renderNotifications();
+  updateBadges();
+  if (shouldUsePushNotification(notification)) {
+    sendBrowserPushNotification(notification);
+    return;
+  }
+  if (isUserActiveInApp()) {
+    if (!isNotificationCenterOpen()) showGroupedNotificationToast(notification);
+    if (notification.priority === "HIGH" && !isNotificationCenterOpen()) playNotificationSound(notification.type);
+  }
+}
+
+function showGroupedNotificationToast(notification) {
+  notificationToastQueue.push(notification);
+  window.clearTimeout(notificationGroupTimer);
+  notificationGroupTimer = window.setTimeout(() => {
+    const items = notificationToastQueue.splice(0);
+    if (!items.length) return;
+    const latest = items[items.length - 1];
+    const grouped = items.length > 1
+      ? { ...latest, title: `${items.length} notificaciones nuevas`, body: "Tenes nueva actividad pendiente en NexuDrive." }
+      : latest;
+    renderNotificationToast(grouped);
+  }, 250);
+}
+
+function renderNotificationToast(notification) {
+  const toast = $("#notification-toast");
+  if (!toast) return;
+  toast.innerHTML = `
+    <button type="button" data-notification-id="${escapeHTML(notification.id)}">
+      <span class="notification-icon"><i class="fa-solid ${notificationIcon(notification.type)}"></i></span>
+      <span><strong>${escapeHTML(notification.title)}</strong><p>${escapeHTML(notification.body)}</p></span>
+    </button>
+  `;
+  toast.hidden = false;
+  toast.querySelector("button")?.addEventListener("click", () => openNotificationDetail(notification.id));
+  window.clearTimeout(notificationToastTimer);
+  notificationToastTimer = window.setTimeout(() => { toast.hidden = true; }, 4200);
+}
+
+function renderNotifications() {
+  const list = $("#notification-list");
+  const empty = $("#notification-empty");
+  if (!list || !empty) return;
+  const notifications = notificationsForCurrentUser();
+  empty.hidden = notifications.length > 0;
+  list.innerHTML = notifications.map(notificationItemMarkup).join("");
+  $$(".notification-item").forEach((item) => item.addEventListener("click", () => openNotificationDetail(item.dataset.notificationId)));
+  syncNotificationPermissionButton();
+}
+
+function notificationItemMarkup(notification) {
+  const priorityClass = notification.priority.toLowerCase();
+  return `
+    <button class="notification-item ${priorityClass} ${notification.read ? "" : "unread"}" type="button" data-notification-id="${escapeHTML(notification.id)}">
+      <span class="notification-icon"><i class="fa-solid ${notificationIcon(notification.type)}"></i></span>
+      <span class="notification-copy">
+        <span class="notification-meta"><span>${escapeHTML(notification.priority)}</span><span>${timeAgo(notification.created_at)}</span></span>
+        <strong>${escapeHTML(notification.title)}</strong>
+        <p>${escapeHTML(notification.body)}</p>
+      </span>
+    </button>
+  `;
+}
+
+function toggleNotificationCenter() {
+  isNotificationCenterOpen() ? closeNotificationCenter() : openNotificationCenter();
+}
+
+function openNotificationCenter() {
+  const center = $("#notification-center");
+  const backdrop = $("#notification-backdrop");
+  const toggle = $("#notification-toggle");
+  if (!center || !backdrop) return;
+  center.classList.add("open");
+  center.setAttribute("aria-hidden", "false");
+  backdrop.hidden = false;
+  toggle?.classList.add("active");
+  toggle?.setAttribute("aria-expanded", "true");
+  markAllNotificationsRead(true);
+}
+
+function closeNotificationCenter() {
+  const center = $("#notification-center");
+  const backdrop = $("#notification-backdrop");
+  const toggle = $("#notification-toggle");
+  center?.classList.remove("open");
+  center?.setAttribute("aria-hidden", "true");
+  if (backdrop) backdrop.hidden = true;
+  toggle?.classList.remove("active");
+  toggle?.setAttribute("aria-expanded", "false");
+}
+
+function isNotificationCenterOpen() {
+  return Boolean($("#notification-center")?.classList.contains("open"));
+}
+
+function openNotificationDetail(id) {
+  const notification = state.notifications.find((item) => item.id === id);
+  if (!notification) return;
+  notification.read = true;
+  saveNotifications();
+  renderNotifications();
+  updateBadges();
+  if (["job_request", "job_accepted", "job_cancelled"].includes(notification.type)) {
+    if (notification.type === "job_request") state.offersTab = "solicitudes";
+    showScreen(notification.type === "job_request" ? "mis-ofertas" : "reservas");
+  }
+  closeNotificationCenter();
+  const toast = $("#notification-toast");
+  if (toast) toast.hidden = true;
+}
+
+function markAllNotificationsRead(shouldRender = true) {
+  let changed = false;
+  notificationsForCurrentUser().forEach((notification) => {
+    if (!notification.read) {
+      notification.read = true;
+      changed = true;
+    }
+  });
+  if (changed) saveNotifications();
+  if (shouldRender) renderNotifications();
+  updateBadges();
+}
+
+async function requestBrowserNotificationPermission() {
+  if (!("Notification" in window)) {
+    showToast("Este navegador no soporta notificaciones push.");
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  syncNotificationPermissionButton();
+  showToast(permission === "granted" ? "Avisos del navegador activados." : "No se activaron los avisos del navegador.");
+}
+
+function syncNotificationPermissionButton() {
+  const button = $("#notification-permission");
+  if (!button) return;
+  if (!("Notification" in window)) {
+    button.hidden = true;
+    return;
+  }
+  button.hidden = Notification.permission === "granted";
+}
+
+function shouldUsePushNotification(notification) {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission !== "granted") return false;
+  if (!isPushEligiblePriority(notification)) return false;
+  return document.hidden || !isUserActiveInApp();
+}
+
+function isPushEligiblePriority(notification) {
+  return notification.priority === "HIGH" || (notification.priority === "MEDIUM" && ["job_accepted", "job_cancelled"].includes(notification.type));
+}
+
+function sendBrowserPushNotification(notification) {
+  if (navigator.serviceWorker?.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: "NEXUDRIVE_NOTIFICATION", notification });
+    return;
+  }
+  try {
+    new Notification(notification.title, { body: notification.body, tag: notification.related_id || notification.id, data: notification });
+  } catch (_) {}
+}
+
+function isUserActiveInApp() {
+  return !document.hidden && Date.now() - lastUserActivityAt < 60000;
+}
+
+function notificationsForCurrentUser() {
+  const userId = currentUserId();
+  return state.notifications
+    .filter((item) => !item.user_id || item.user_id === userId)
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+}
+
+function unreadNotificationsCount() {
+  return notificationsForCurrentUser().filter((item) => !item.read).length;
+}
+
+function normalizeNotificationPriority(priority) {
+  const value = clean(priority).toUpperCase();
+  return ["HIGH", "MEDIUM", "LOW"].includes(value) ? value : "LOW";
+}
+
+function notificationIcon(type) {
+  const icons = {
+    job_request: "fa-clipboard-list",
+    job_accepted: "fa-circle-check",
+    job_cancelled: "fa-triangle-exclamation",
+    message: "fa-message",
+    system: "fa-circle-info",
+  };
+  return icons[type] || icons.system;
+}
+
+function notificationId() {
+  if (crypto?.randomUUID) return crypto.randomUUID();
+  return `nt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function playNotificationSound(type) {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const context = new AudioContext();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const tone = type === "job_cancelled" ? 180 : type === "job_accepted" ? 660 : 880;
+    oscillator.type = "sine";
+    oscillator.frequency.value = tone;
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.22);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.24);
+  } catch (_) {}
+}
+
+function timeAgo(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Ahora";
+  const diff = Math.max(0, Date.now() - date.getTime());
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "Ahora";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h`;
+  return formatDate(value);
+}
 function updateBadges() {
   const pendingCount = state.reservations.filter((r) => r.status === "pending").length;
   const badge = $("#reservation-badge");
@@ -3605,6 +3957,13 @@ function updateBadges() {
   const offersBadge = $("#offers-badge");
   offersBadge.hidden = pendingCount === 0;
   offersBadge.textContent = pendingCount;
+
+  const notificationCount = unreadNotificationsCount();
+  const notificationBadge = $("#notification-badge");
+  if (notificationBadge) {
+    notificationBadge.hidden = notificationCount === 0;
+    notificationBadge.textContent = notificationCount > 9 ? "9+" : notificationCount;
+  }
 }
 
 /* ─── STORAGE ─── */
@@ -3623,6 +3982,9 @@ function saveDelayRecords() {
 }
 function saveAvailabilitySlots() {
   localStorage.setItem(STORAGE_KEYS.availabilitySlots, JSON.stringify(state.availabilitySlots));
+}
+function saveNotifications() {
+  localStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(state.notifications));
 }
 function saveAuth() {
   if (state.auth) {

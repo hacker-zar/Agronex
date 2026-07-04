@@ -47,6 +47,10 @@
     </nav>
 
     <div class="topbar-right">
+      <button class="notification-button" id="notification-toggle" type="button" aria-label="Abrir notificaciones" aria-expanded="false">
+        <i class="fa-regular fa-bell"></i>
+        <strong id="notification-badge" class="badge" hidden>0</strong>
+      </button>
       <button class="user-chip" id="user-chip" type="button" aria-label="Entrar al perfil">
         <span class="user-chip-avatar" id="user-chip-avatar">ND</span>
         <span id="user-chip-name">Mi cuenta</span>
@@ -416,6 +420,31 @@
     </section>
 
   </main>
+
+  <!-- CENTRO DE NOTIFICACIONES -->
+  <div class="notification-backdrop" id="notification-backdrop" hidden></div>
+  <aside class="notification-center" id="notification-center" aria-labelledby="notification-center-title" aria-hidden="true">
+    <div class="notification-center-head">
+      <div>
+        <p class="eyebrow">Actividad</p>
+        <h2 id="notification-center-title">Notificaciones</h2>
+      </div>
+      <button class="icon-btn" type="button" id="notification-close" aria-label="Cerrar notificaciones">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div class="notification-center-actions">
+      <button class="link-button" type="button" id="notification-permission">
+        <i class="fa-regular fa-bell"></i> Activar avisos
+      </button>
+      <button class="link-button" type="button" id="notification-mark-read">Marcar leidas</button>
+    </div>
+    <div class="notification-list" id="notification-list"></div>
+    <div class="notification-empty" id="notification-empty" hidden>
+      <i class="fa-regular fa-bell-slash"></i>
+      <p>No tenes notificaciones por ahora.</p>
+    </div>
+  </aside>
 
   <!-- MODAL PERFIL PUBLICO -->
   <div class="modal-backdrop" id="public-profile-modal" hidden>
@@ -922,6 +951,7 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
+  <div class="notification-toast" id="notification-toast" hidden></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script type="module" src="/js/app.js"></script>
 </body>
