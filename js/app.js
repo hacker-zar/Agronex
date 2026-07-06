@@ -13,6 +13,10 @@ const STORAGE_KEYS = {
   availabilitySlots: "nexudrive_mvp_availability_slots",
   notifications: "nexudrive_mvp_notifications",
   auth: "nexudrive_mvp_auth",
+  devActiveUser: "nexudrive_mvp_dev_active_user",
+  devRecentUsers: "nexudrive_mvp_dev_recent_users",
+  devProfiles: "nexudrive_mvp_dev_profiles",
+  devFixtures: "nexudrive_mvp_dev_fixtures",
   theme: "nexudrive_mvp_theme",
 };
 
@@ -180,6 +184,16 @@ const reviewCategoriesByRole = {
   ],
 };
 
+const reviewTagsByRole = {
+  producer: ["Puntual", "Buena comunicacion", "Trabajo de calidad", "Vehiculo en buenas condiciones", "Muy profesional", "Demoras", "Problemas de coordinacion"],
+  contractor: ["Pedido claro", "Buena coordinacion", "Puntual", "Pago en termino", "Facil de trabajar", "Demoras", "Informacion incompleta"],
+};
+
+const reviewCategoryWeightsByReviewedRole = {
+  contractor: { workCompliance: 0.4, punctuality: 0.25, communication: 0.25, vehicleCondition: 0.1 },
+  producer: { paymentCompliance: 0.4, coordination: 0.25, loadPunctuality: 0.25, requestClarity: 0.1 },
+};
+
 const defaultPriceUnitByCategory = {
   Tractor: "hectarea",
   Sembradora: "hectarea",
@@ -199,6 +213,21 @@ const seedPricingCorrections = {
   "m-camion-scania": { oldPrice: 28, price: 3500, priceUnit: "kilometro" },
   "m-embolsadora-richiger": { oldPrice: 18, price: 7500, priceUnit: "tonelada" },
 };
+
+const operationFlow = [
+  { key: "accepted", label: "Solicitud aceptada", action: "Salir hacia el origen", icon: "fa-circle-check", notify: "La solicitud fue aceptada." },
+  { key: "on_way_origin", label: "En camino al origen", action: "Llegue al origen", icon: "fa-route", notify: "El contratista salio hacia el origen." },
+  { key: "arrived_origin", label: "Llego al origen", action: "Comenzar carga", icon: "fa-location-dot", notify: "El contratista llego al origen." },
+  { key: "loading", label: "Cargando", action: "Carga finalizada", icon: "fa-boxes-stacked", notify: "Comenzo la carga." },
+  { key: "loaded", label: "Carga finalizada", action: "Iniciar viaje", icon: "fa-clipboard-check", notify: "Finalizo la carga." },
+  { key: "in_transit_destination", label: "En viaje al destino", action: "Llegue al destino", icon: "fa-truck-fast", notify: "El contratista esta en viaje al destino." },
+  { key: "arrived_destination", label: "Llego al destino", action: "Comenzar descarga", icon: "fa-map-pin", notify: "El contratista llego al destino." },
+  { key: "unloading", label: "Descargando", action: "Descarga finalizada", icon: "fa-dolly", notify: "Comenzo la descarga." },
+  { key: "unloaded", label: "Descarga finalizada", action: "Finalizar trabajo", icon: "fa-flag-checkered", notify: "Finalizo la descarga." },
+  { key: "done", label: "Trabajo finalizado", action: "", icon: "fa-circle-check", notify: "El trabajo fue finalizado." },
+];
+
+const operationIncidents = ["Voy con demora", "Ruta cortada", "Problema mecanico", "Clima adverso", "Otro inconveniente"];
 
 const statusLabels = {
   pending:  "Pendiente",
@@ -223,6 +252,69 @@ const availabilitySlotStatusLabels = {
   unavailable: "No disponible",
 };
 
+
+const defaultProfile = {
+  name: "",
+  zone: "Pergamino, Buenos Aires",
+  hectares: "120",
+  baseLocation: "Pergamino, Buenos Aires",
+  operationRadiusKm: 80,
+  bio: "",
+};
+
+const devTestUsers = [
+  {
+    id: "dev-juan1",
+    name: "Juan1",
+    email: "juan1@agronex.dev",
+    businessName: "Juan1 Servicios",
+    profile: {
+      name: "Juan1",
+      zone: "Rosario, Santa Fe",
+      hectares: "180",
+      baseLocation: "Rosario, Santa Fe",
+      baseLatitude: -32.9468,
+      baseLongitude: -60.6393,
+      operationRadiusKm: 90,
+      bio: "Productor y contratista de prueba para validar el flujo completo del MVP.",
+    },
+  },
+  {
+    id: "dev-jose2",
+    name: "Jose2",
+    email: "jose2@agronex.dev",
+    businessName: "Jose2 Cosecha",
+    profile: {
+      name: "Jose2",
+      zone: "Pergamino, Buenos Aires",
+      hectares: "320",
+      baseLocation: "Pergamino, Buenos Aires",
+      baseLatitude: -33.8895,
+      baseLongitude: -60.5736,
+      operationRadiusKm: 120,
+      bio: "Contratista de prueba con foco en cosecha y servicios de campania.",
+    },
+  },
+  {
+    id: "dev-maria3",
+    name: "Maria3",
+    email: "maria3@agronex.dev",
+    businessName: "Maria3 Transporte",
+    profile: {
+      name: "Maria3",
+      zone: "Venado Tuerto, Santa Fe",
+      hectares: "95",
+      baseLocation: "Venado Tuerto, Santa Fe",
+      baseLatitude: -33.7456,
+      baseLongitude: -61.9688,
+      operationRadiusKm: 160,
+      bio: "Usuaria de prueba para transporte, embolsado y coordinacion logistica.",
+    },
+  },
+];
+
+const devUserSwitcherEnabled = Boolean(import.meta.env?.DEV);
+
 const state = {
   screen:       "catalogo",
   offersTab:    "activas",
@@ -237,16 +329,9 @@ const state = {
   reviews: readJSON(STORAGE_KEYS.reviews, []),
   availabilitySlots: readJSON(STORAGE_KEYS.availabilitySlots, []),
   notifications: readJSON(STORAGE_KEYS.notifications, []),
-  auth:         readObject(STORAGE_KEYS.auth, null),
+  auth:         initialAuth(),
   theme:        normalizeTheme(localStorage.getItem(STORAGE_KEYS.theme)),
-  profile:      readObject("nexudrive_mvp_profile", {
-    name:     "",
-    zone:     "Pergamino, Buenos Aires",
-    hectares: "120",
-    baseLocation: "Pergamino, Buenos Aires",
-    operationRadiusKm: 80,
-    bio:      "",
-  }),
+  profile:      initialProfile(),
   publishStep: 1,
 };
 
@@ -256,6 +341,7 @@ let notificationToastTimer = null;
 let notificationGroupTimer = null;
 let notificationToastQueue = [];
 let lastUserActivityAt = Date.now();
+let lastOperationUndo = null;
 const locationPickerState = { map: null, marker: null, form: null, selected: null, operationCircle: null, operationCenterMarker: null, operationCenter: null };
 
 const $ = (sel) => document.querySelector(sel);
@@ -265,6 +351,8 @@ document.addEventListener("DOMContentLoaded", init);
 
 function init() {
   applyTheme(state.theme);
+  ensureDevUserFixtures();
+  bindDevUserSwitcher();
   bindNavigation();
   bindForms();
   bindPublishWizard();
@@ -284,6 +372,7 @@ function init() {
   bindReviewModal();
   bindLocationPicker();
   bindOffersTabs();
+  bindOperationSheet();
   syncMachineRatingsFromReviews();
   render();
   persistMachinePricingMigration();
@@ -291,6 +380,334 @@ function init() {
 }
 
 /* ─── NAVIGATION ─── */
+
+function initialAuth() {
+  if (!devUserSwitcherEnabled) return readObject(STORAGE_KEYS.auth, null);
+  return devAuthFor(activeDevUserId());
+}
+
+function initialProfile() {
+  if (!devUserSwitcherEnabled) return readObject("nexudrive_mvp_profile", defaultProfile);
+  return devProfileFor(activeDevUserId());
+}
+
+function activeDevUserId() {
+  const stored = clean(localStorage.getItem(STORAGE_KEYS.devActiveUser));
+  return devTestUsers.some((user) => user.id === stored) ? stored : devTestUsers[0].id;
+}
+
+function devUserById(id) {
+  return devTestUsers.find((user) => user.id === id) || devTestUsers[0];
+}
+
+function devAuthFor(id) {
+  const user = devUserById(id);
+  return {
+    email: user.email,
+    name: user.name,
+    devUserId: user.id,
+    isDevUser: true,
+    signedInAt: new Date().toISOString(),
+  };
+}
+
+function devProfileFor(id) {
+  const user = devUserById(id);
+  const profiles = readObject(STORAGE_KEYS.devProfiles, {});
+  return { ...defaultProfile, ...user.profile, ...(profiles[user.id] || {}) };
+}
+
+function currentDevUser() {
+  return devUserById(state.auth?.devUserId || activeDevUserId());
+}
+
+
+function bindDevUserSwitcher() {
+  const root = $("#dev-user-switcher");
+  const button = $("#dev-user-button");
+  const menu = $("#dev-user-menu");
+  if (!root || !button || !menu) return;
+  if (!devUserSwitcherEnabled) {
+    root.hidden = true;
+    return;
+  }
+  root.hidden = false;
+  button.addEventListener("click", () => toggleDevUserMenu());
+  menu.addEventListener("click", (event) => {
+    const option = event.target.closest(".dev-user-option");
+    if (!option) return;
+    switchDevUser(option.dataset.userId);
+  });
+  document.addEventListener("click", (event) => {
+    if (!root.contains(event.target)) closeDevUserMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeDevUserMenu();
+  });
+  renderDevUserSwitcher();
+}
+
+function toggleDevUserMenu() {
+  const menu = $("#dev-user-menu");
+  const button = $("#dev-user-button");
+  if (!menu || !button) return;
+  const willOpen = menu.hidden;
+  menu.hidden = !willOpen;
+  button.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  if (willOpen) renderDevUserSwitcher();
+}
+
+function closeDevUserMenu() {
+  const menu = $("#dev-user-menu");
+  const button = $("#dev-user-button");
+  if (menu) menu.hidden = true;
+  if (button) button.setAttribute("aria-expanded", "false");
+}
+
+function renderDevUserSwitcher() {
+  const root = $("#dev-user-switcher");
+  if (!root || !devUserSwitcherEnabled) return;
+  const activeId = currentUserId();
+  const activeUser = devUserById(state.auth?.devUserId || activeDevUserId());
+  const label = $("#dev-user-label");
+  if (label) label.textContent = "Usuario activo: " + activeUser.name;
+  const menu = $("#dev-user-menu");
+  if (!menu) return;
+  const recent = readJSON(STORAGE_KEYS.devRecentUsers, []);
+  const ordered = [
+    activeUser,
+    ...recent.map(devUserById),
+    ...devTestUsers,
+  ].filter((user, index, list) => user && list.findIndex((item) => item.id === user.id) === index);
+  menu.innerHTML = ordered.map((user) => {
+    const active = user.email === activeId;
+    return '<button class="dev-user-option ' + (active ? 'active' : '') + '" type="button" data-user-id="' + escapeHTML(user.id) + '">' +
+      '<span>' + (active ? 'Activo - ' : '') + escapeHTML(user.name) + '</span>' +
+      '<small>' + escapeHTML(user.businessName) + '</small>' +
+    '</button>';
+  }).join("");
+}
+
+function switchDevUser(id) {
+  const user = devUserById(id);
+  if (!user || currentUserId() === user.email) {
+    closeDevUserMenu();
+    return;
+  }
+  saveProfile();
+  localStorage.setItem(STORAGE_KEYS.devActiveUser, user.id);
+  rememberDevUser(user.id);
+  state.auth = devAuthFor(user.id);
+  state.profile = devProfileFor(user.id);
+  saveAuth();
+  syncProfileFormFromState();
+  updateOperationRadiusValue();
+  if (state.screen === "acceso") state.screen = "catalogo";
+  closeDevUserMenu();
+  render();
+  showScreen(state.screen);
+  showToast("Usuario activo: " + user.name);
+}
+
+function rememberDevUser(id) {
+  const recent = readJSON(STORAGE_KEYS.devRecentUsers, []);
+  const next = [id, ...recent.filter((item) => item !== id && devTestUsers.some((user) => user.id === item))].slice(0, devTestUsers.length);
+  localStorage.setItem(STORAGE_KEYS.devRecentUsers, JSON.stringify(next));
+}
+
+function ensureDevUserFixtures() {
+  if (!devUserSwitcherEnabled) return;
+  localStorage.setItem(STORAGE_KEYS.devActiveUser, activeDevUserId());
+  const profiles = readObject(STORAGE_KEYS.devProfiles, {});
+  let profilesChanged = false;
+  devTestUsers.forEach((user) => {
+    if (!profiles[user.id]) {
+      profiles[user.id] = user.profile;
+      profilesChanged = true;
+    }
+  });
+  if (profilesChanged) localStorage.setItem(STORAGE_KEYS.devProfiles, JSON.stringify(profiles));
+
+  const fixtures = devFixtures();
+  let machinesChanged = false;
+  fixtures.machines.forEach((machine) => {
+    if (!state.machines.some((item) => item.id === machine.id)) {
+      state.machines.unshift(machine);
+      machinesChanged = true;
+    }
+  });
+  let slotsChanged = false;
+  fixtures.availabilitySlots.forEach((slot) => {
+    if (!state.availabilitySlots.some((item) => item.id === slot.id)) {
+      state.availabilitySlots.unshift(slot);
+      slotsChanged = true;
+    }
+  });
+  let reservationsChanged = false;
+  fixtures.reservations.forEach((reservation) => {
+    if (!state.reservations.some((item) => item.id === reservation.id)) {
+      state.reservations.unshift(reservation);
+      reservationsChanged = true;
+    }
+  });
+  let reviewsChanged = false;
+  fixtures.reviews.forEach((review) => {
+    if (!state.reviews.some((item) => item.id === review.id)) {
+      state.reviews.unshift(review);
+      reviewsChanged = true;
+    }
+  });
+  let notificationsChanged = false;
+  fixtures.notifications.forEach((notification) => {
+    if (!state.notifications.some((item) => item.id === notification.id)) {
+      state.notifications.unshift(notification);
+      notificationsChanged = true;
+    }
+  });
+  if (machinesChanged) localStorage.setItem(STORAGE_KEYS.machines, JSON.stringify(state.machines));
+  if (slotsChanged) localStorage.setItem(STORAGE_KEYS.availabilitySlots, JSON.stringify(state.availabilitySlots));
+  if (reservationsChanged) localStorage.setItem(STORAGE_KEYS.reservations, JSON.stringify(state.reservations));
+  if (reviewsChanged) localStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(state.reviews));
+  if (notificationsChanged) localStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(state.notifications));
+}
+
+function devFixtures() {
+  return {
+    machines: [
+      devFixtureMachine("m-dev-juan1-tractor", "Tractor John Deere 6120J", "Tractor", "dev-juan1", 35, "hectarea", "Rosario, Santa Fe", "Disponible esta semana"),
+      devFixtureMachine("m-dev-jose2-cosechadora", "Cosechadora Case IH 8250", "Cosechadora", "dev-jose2", 120, "hectarea", "Pergamino, Buenos Aires", "Disponible hoy"),
+      devFixtureMachine("m-dev-maria3-camion", "Camion Scania R450", "Camion", "dev-maria3", 3500, "kilometro", "Venado Tuerto, Santa Fe", "Disponible manana"),
+    ],
+    availabilitySlots: [
+      devFixtureSlot("slot-dev-juan1-tractor", "m-dev-juan1-tractor", "2026-07-08", "2026-07-12", 32),
+      devFixtureSlot("slot-dev-jose2-cosechadora", "m-dev-jose2-cosechadora", "2026-07-06", "2026-07-10", 40),
+      devFixtureSlot("slot-dev-maria3-camion", "m-dev-maria3-camion", "2026-07-07", "2026-07-14", 55),
+    ],
+    reservations: [
+      devFixtureReservation("r-dev-juan1-jose2", "dev-juan1", "dev-jose2", "m-dev-jose2-cosechadora", "Cosechadora Case IH 8250", "Cosechadora", "pending", "2026-07-09", 120),
+      devFixtureReservation("r-dev-jose2-maria3", "dev-jose2", "dev-maria3", "m-dev-maria3-camion", "Camion Scania R450", "Camion", "accepted", "2026-07-08", 0, { estimatedKm: 84, cargoType: "Maiz", origin: "Lote La Esperanza", destination: "Cooperativa Bouquet" }),
+      devFixtureReservation("r-dev-maria3-juan1", "dev-maria3", "dev-juan1", "m-dev-juan1-tractor", "Tractor John Deere 6120J", "Tractor", "done", "2026-07-01", 42),
+    ],
+    reviews: [
+      {
+        id: "review-dev-maria3-juan1",
+        reservationId: "r-dev-maria3-juan1",
+        reviewerId: "producer:maria3",
+        reviewerName: "Maria3",
+        reviewerRole: "producer",
+        reviewedUserId: "contractor:juan1-servicios",
+        reviewedName: "Juan1 Servicios",
+        reviewedUserType: "Contratista",
+        reviewedRole: "contractor",
+        overallRating: 5,
+        categories: { punctuality: 5, communication: 5, vehicleCondition: 4, workCompliance: 5 },
+        tags: ["Puntual", "Buena comunicacion"],
+        wouldWorkAgain: true,
+        comment: "Trabajo coordinado sin problemas.",
+        createdAt: "2026-07-02T12:00:00.000Z",
+      },
+    ],
+    notifications: [
+      devFixtureNotification("notif-dev-juan1", "dev-juan1", "job_accepted", "Trabajo finalizado", "Ya podes evaluar a Juan1 Servicios.", "MEDIUM", "r-dev-maria3-juan1"),
+      devFixtureNotification("notif-dev-jose2", "dev-jose2", "job_request", "Nueva solicitud", "Juan1 solicito la Cosechadora Case IH 8250.", "HIGH", "r-dev-juan1-jose2"),
+      devFixtureNotification("notif-dev-maria3", "dev-maria3", "job_accepted", "Solicitud aceptada", "Tenes un viaje confirmado para Jose2.", "MEDIUM", "r-dev-jose2-maria3"),
+    ],
+  };
+}
+
+function devFixtureMachine(id, title, category, userId, price, priceUnit, location, availability) {
+  const user = devUserById(userId);
+  return {
+    id,
+    title,
+    category,
+    price,
+    precio: price,
+    priceUnit,
+    unidad_precio: priceUnit,
+    location,
+    availability,
+    owner: user.businessName,
+    ownerId: user.email,
+    devOwnerUserId: user.id,
+    description: title + " publicado para pruebas de desarrollo.",
+    distanceKm: null,
+    rating: 4.8,
+    reviews: 1,
+    operator: true,
+    offerStatus: "active",
+  };
+}
+
+function devFixtureSlot(id, machineId, startDate, endDate, estimatedHours) {
+  return { id, machineId, startDate, endDate, estimatedHours, status: "available" };
+}
+
+function devFixtureReservation(id, requesterId, contractorId, machineId, machineTitle, category, status, date, hectares, extra = {}) {
+  const requester = devUserById(requesterId);
+  const contractor = devUserById(contractorId);
+  const priceUnit = category === "Camion" ? "kilometro" : "hectarea";
+  return compactRecord({
+    id,
+    machineId,
+    machineTitle,
+    owner: contractor.businessName,
+    ownerId: contractor.email,
+    category,
+    status,
+    date,
+    startTime: "08:00",
+    endTime: status === "done" ? "17:30" : "",
+    serviceType: defaultJobByCategory[category] || "Labores generales",
+    jobType: defaultJobByCategory[category] || "Labores generales",
+    job: defaultJobByCategory[category] || "Labores generales",
+    requestedBy: requester.email,
+    requestedByName: requester.name,
+    requestMode: category === "Camion" ? "truck" : "default",
+    unitPrice: category === "Camion" ? 3500 : 35,
+    priceUnit,
+    unidad_precio: priceUnit,
+    hectares,
+    estimatedKm: extra.estimatedKm,
+    cargoType: extra.cargoType,
+    origin: extra.origin,
+    destination: extra.destination,
+    field: "Partido de Pergamino, Buenos Aires, Argentina",
+    location: { address: "Partido de Pergamino, Buenos Aires, Argentina", latitude: -33.8895, longitude: -60.5736 },
+    createdAt: "2026-07-01T10:15:00.000Z",
+    acceptedAt: ["accepted", "working", "done"].includes(status) ? "2026-07-01T14:40:00.000Z" : "",
+    completedAt: status === "done" ? "2026-07-02T18:00:00.000Z" : "",
+    resolvedAt: status === "done" ? "2026-07-02T18:00:00.000Z" : "",
+    wasAccepted: ["accepted", "working", "done"].includes(status),
+  });
+}
+
+function devFixtureNotification(id, userId, type, title, body, priority, relatedId) {
+  const user = devUserById(userId);
+  return { id, user_id: user.email, type, title, body, priority, read: false, created_at: "2026-07-02T09:00:00.000Z", related_id: relatedId };
+}
+
+function activeUserOwnsMachine(machine) {
+  const userId = currentUserId();
+  if (!userId || userId === "local-user") return true;
+  if (!devUserSwitcherEnabled && !clean(machine.ownerId)) return true;
+  return clean(machine.ownerId) === userId || clean(machine.devOwnerUserId) === clean(state.auth?.devUserId) || clean(machine.owner) === currentUserLabel();
+}
+
+function activeUserRequestedReservation(reservation) {
+  return clean(reservation.requestedBy) === currentUserId() || clean(reservation.requestedByName) === currentUserLabel();
+}
+
+function activeUserOwnsReservationMachine(reservation) {
+  const machine = findMachine(reservation.machineId);
+  if (!devUserSwitcherEnabled && !clean(reservation.ownerId) && machine && !clean(machine.ownerId)) return true;
+  return clean(reservation.ownerId) === currentUserId() || (machine && activeUserOwnsMachine(machine)) || clean(reservation.owner) === currentUserLabel();
+}
+
+function visibleReservationForActiveUser(reservation) {
+  return activeUserRequestedReservation(reservation) || activeUserOwnsReservationMachine(reservation);
+}
+
 function bindNavigation() {
   $$("[data-nav]").forEach((btn) => {
     btn.addEventListener("click", () => showScreen(btn.dataset.nav));
@@ -416,7 +833,8 @@ function bindForms() {
         location:     clean(form.get("location")),
         availability: availabilityLabelForSlot(availabilitySlot),
         plate:        normalizePlate(form.get("plate")),
-        owner:        clean(form.get("owner")),
+        owner:        clean(form.get("owner")) || currentUserLabel(),
+        ownerId:      currentUserId(),
         description:  clean(form.get("description")) || "Maquinaria publicada para solicitar reserva.",
         distanceKm:   null, rating: null, reviews: 0,
         offerStatus:  "active",
@@ -878,41 +1296,32 @@ function resetPublishWizard() {
 }
 
 /* ─── PROFILE ─── */
+
 function bindProfile() {
   const form = $("#profile-form");
-  form.elements.name.value = state.profile.name || "";
-  form.elements.zone.value = state.profile.zone || "";
-  form.elements.baseLocation.value = state.profile.baseLocation || state.profile.zone || "";
-  formControl(form, "hectares").value = state.profile.hectares || "";
-  formControl(form, "operationRadiusKm").value = profileOperationRadiusKm();
+  syncProfileFormFromState();
   updateOperationRadiusValue();
-  form.elements.bio.value = state.profile.bio || "";
-
+  syncThemeControls();
   form.addEventListener("input", (event) => {
+    if (event.target?.name === "operationRadiusKm") updateOperationRadiusValue(event.target.value);
     state.profile = profileFromForm();
-    if (["baseLocation", "zone"].includes(event.target?.name)) locationPickerState.operationCenter = profileBaseLocation();
-    updateOperationRadiusValue();
+    saveProfile();
     renderProfile();
     updateOperationCircle();
-    updateLocationSelectionUI(locationPickerState.selected);
   });
-
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     state.profile = profileFromForm();
     saveProfile();
     renderProfile();
     updateOperationCircle();
-    showToast("Perfil guardado.");
+    showToast("Perfil actualizado.");
   });
-
   form.querySelectorAll('input[name="theme"]').forEach((input) => {
     input.addEventListener("change", () => {
-      if (!input.checked) return;
       setTheme(input.value);
     });
   });
-
   $("#logout-btn").addEventListener("click", () => {
     state.auth = null;
     saveAuth();
@@ -921,6 +1330,17 @@ function bindProfile() {
     showToast("Sesion cerrada.");
     showScreen("acceso");
   });
+}
+
+function syncProfileFormFromState() {
+  const form = $("#profile-form");
+  if (!form) return;
+  form.elements.name.value = state.profile.name || "";
+  form.elements.zone.value = state.profile.zone || "";
+  form.elements.baseLocation.value = state.profile.baseLocation || state.profile.zone || "";
+  formControl(form, "hectares").value = state.profile.hectares || "";
+  formControl(form, "operationRadiusKm").value = profileOperationRadiusKm();
+  form.elements.bio.value = state.profile.bio || "";
 }
 
 function profileFromForm() {
@@ -1263,6 +1683,7 @@ function bindAuth() {
 
     saveAuth();
     hideAuthError();
+    if (devUserSwitcherEnabled) renderDevUserSwitcher();
     renderProfile();
     showToast(mode === "register" ? "Cuenta creada." : "Sesion iniciada.");
     showScreen("perfil");
@@ -1314,6 +1735,7 @@ function render() {
   syncThemeControls();
   renderPublishStep();
   renderNotifications();
+  renderDevUserSwitcher();
   updateBadges();
 }
 
@@ -1540,7 +1962,7 @@ function renderMisOfertas() {
   $$("#offers-tabs .offers-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === state.offersTab);
   });
-  const myMachines = state.machines;
+  const myMachines = state.machines.filter(activeUserOwnsMachine);
 
   // Count per tab
   const activas    = myMachines.filter((m) => m.offerStatus === "active");
@@ -1548,7 +1970,7 @@ function renderMisOfertas() {
   const inactivas  = myMachines.filter((m) => m.offerStatus === "inactive");
 
   // Solicitudes = reservations pending (that can be resolved as contractor)
-  const solicitudes = state.reservations.filter(isContractorNegotiationStatus);
+  const solicitudes = state.reservations.filter((reservation) => activeUserOwnsReservationMachine(reservation) && isContractorNegotiationStatus(reservation));
 
   $("#tab-count-activas").textContent    = activas.length;
   $("#tab-count-pausadas").textContent   = pausadas.length;
@@ -1593,6 +2015,10 @@ function renderMisOfertas() {
         btn.addEventListener("click", () => acceptRescheduleRequest(btn.dataset.rescheduleId)));
       $$(".reject-reschedule-btn").forEach((btn) =>
         btn.addEventListener("click", () => rejectRescheduleRequest(btn.dataset.rescheduleId)));
+      $$(".operation-next-btn").forEach((btn) =>
+        btn.addEventListener("click", () => advanceOperationState(btn.dataset.reservationId)));
+      $$(".open-operation-sheet-btn").forEach((btn) =>
+        btn.addEventListener("click", () => openOperationSheet(btn.dataset.reservationId)));
       $$(".reject-solicitud-btn").forEach((btn) =>
         btn.addEventListener("click", () => confirmAction(
           "Rechazar solicitud",
@@ -1712,12 +2138,287 @@ function solicitudCard(reservation) {
       </div>
       ${solicitudLogisticsPanel(reservation)}
       ${scheduleNegotiationSection(reservation, "contractor")}
+      ${contractorOperationPanel(reservation)}
       ${rescheduleSection(reservation, "contractor")}
       ${contractorScheduleActions(reservation)}
     </div>
   `;
 }
 
+function contractorOperationPanel(reservation) {
+  if (!operationVisibleForReservation(reservation)) return "";
+  const current = currentOperationState(reservation);
+  const next = nextOperationState(current.key);
+  const incidents = operationIncidentsMarkup(reservation);
+  const locationNote = reservation.locationSharingActive
+    ? `<p class="operation-location-note"><i class="fa-solid fa-location-crosshairs"></i> Ubicacion compartida durante esta contratacion.</p>`
+    : "";
+  return `
+    <section class="operation-status-card" aria-label="Seguimiento operativo">
+      <div class="operation-status-head">
+        <div class="operation-status-title">
+          <span class="operation-status-icon"><i class="fa-solid ${current.icon}"></i></span>
+          <div>
+            <span>Estado actual del viaje</span>
+            <strong>${escapeHTML(current.label)}</strong>
+          </div>
+        </div>
+        <div class="operation-status-time">${operationUpdatedLabel(reservation)}</div>
+      </div>
+      ${operationTimeline(reservation)}
+      <div class="operation-actions">
+        ${next ? `<button class="btn primary operation-next-btn" type="button" data-reservation-id="${reservation.id}"><i class="fa-solid ${next.icon}"></i> ${escapeHTML(next.action || next.label)}</button>` : `<button class="btn primary" type="button" disabled><i class="fa-solid fa-check"></i> Trabajo finalizado</button>`}
+        <button class="btn ghost open-operation-sheet-btn" type="button" data-reservation-id="${reservation.id}"><i class="fa-solid fa-sliders"></i> Actualizar estado</button>
+      </div>
+      ${locationNote}
+      ${incidents}
+    </section>
+  `;
+}
+
+function operationVisibleForReservation(reservation) {
+  return ["accepted", "working", "done"].includes(reservation?.status) || Boolean(reservation?.operationStatus || reservation?.operationEvents?.length);
+}
+
+function currentOperationState(reservation) {
+  const key = reservation?.operationStatus || (reservation?.status === "done" ? "done" : reservation?.status === "working" ? "on_way_origin" : "accepted");
+  return operationStateByKey(key) || operationFlow[0];
+}
+
+function operationStateByKey(key) {
+  return operationFlow.find((item) => item.key === key);
+}
+
+function nextOperationState(key) {
+  const index = operationFlow.findIndex((item) => item.key === key);
+  if (index < 0 || index >= operationFlow.length - 1) return null;
+  return operationFlow[index + 1];
+}
+
+function operationTimeline(reservation) {
+  const currentKey = currentOperationState(reservation).key;
+  const currentIndex = Math.max(0, operationFlow.findIndex((item) => item.key === currentKey));
+  return `
+    <div class="status-track operation-track" aria-label="Progreso operativo">
+      ${operationFlow.map((step, i) => `
+        <span class="status-track-step ${i <= currentIndex ? "done" : ""} ${i === currentIndex ? "current" : ""}">
+          <span class="status-track-dot">${i < currentIndex ? '<i class="fa-solid fa-check"></i>' : ""}</span>
+          <span class="status-track-label">${escapeHTML(step.label)}</span>
+          <span class="status-track-time">${operationEventTime(reservation, step.key)}</span>
+        </span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function operationEventTime(reservation, key) {
+  const event = (reservation.operationEvents || []).find((item) => item.status === key);
+  const value = event?.createdAt || (key === "accepted" ? reservation.acceptedAt || reservation.resolvedAt : key === "done" ? reservation.completedAt || reservation.resolvedAt : "");
+  return value ? formatTime(value) : "";
+}
+
+function operationUpdatedLabel(reservation) {
+  const value = reservation.operationUpdatedAt || reservation.completedAt || reservation.startedAt || reservation.acceptedAt || reservation.resolvedAt;
+  return value ? `Actualizado ${formatTime(value)}` : "Sin actualizaciones";
+}
+
+function operationIncidentsMarkup(reservation) {
+  const incidents = reservation.operationIncidents || [];
+  if (!incidents.length) return "";
+  return `
+    <div class="operation-incidents">
+      <span>Incidencias reportadas</span>
+      <ul>${incidents.slice(0, 3).map((item) => `<li><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHTML(item.reason)} � ${formatTime(item.createdAt)}</li>`).join("")}</ul>
+    </div>
+  `;
+}
+
+function advanceOperationState(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  const next = nextOperationState(currentOperationState(reservation).key);
+  if (!next) return;
+  applyOperationState(reservationId, next.key);
+}
+
+function applyOperationState(reservationId, operationKey) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  const next = operationStateByKey(operationKey);
+  if (!reservation || !next) return;
+  const previous = JSON.parse(JSON.stringify(reservation));
+  const now = new Date().toISOString();
+  reservation.operationStatus = next.key;
+  reservation.operationUpdatedAt = now;
+  reservation.operationEvents = [...(reservation.operationEvents || []), { status: next.key, label: next.label, createdAt: now }];
+  if (!reservation.firstResponseAt) reservation.firstResponseAt = now;
+  if (next.key === "accepted") {
+    reservation.status = "accepted";
+  }
+  if (next.key !== "accepted" && next.key !== "done") {
+    reservation.status = "working";
+    reservation.startedAt = reservation.startedAt || now;
+  }
+  if (next.key === "done") {
+    reservation.status = "done";
+    reservation.completedAt = now;
+    reservation.resolvedAt = now;
+    reservation.locationSharingActive = false;
+  }
+  saveReservations();
+  notifyProducerOperationUpdate(reservation, next);
+  if (next.key === "done") emitReviewNotificationsForCompletedJob(reservation);
+  renderReservations();
+  renderMisOfertas();
+  updateBadges();
+  showOperationUndoToast("Estado actualizado correctamente.", () => restoreOperationSnapshot(previous));
+  if (next.key === "on_way_origin" && !reservation.locationSharePrompted) promptLocationSharing(reservation.id);
+}
+
+function restoreOperationSnapshot(snapshot) {
+  const index = state.reservations.findIndex((item) => item.id === snapshot.id);
+  if (index === -1) return;
+  state.reservations[index] = snapshot;
+  saveReservations();
+  renderReservations();
+  renderMisOfertas();
+  updateBadges();
+  showToast("Ultima accion deshecha.");
+}
+
+function notifyProducerOperationUpdate(reservation, stateMeta) {
+  createNotification({
+    user_id: clean(reservation.requestedBy) || currentUserId(),
+    type: "system",
+    title: "Seguimiento actualizado",
+    body: stateMeta.notify || stateMeta.label,
+    priority: stateMeta.key === "done" ? "HIGH" : "MEDIUM",
+    related_id: reservation.id,
+  });
+}
+
+function promptLocationSharing(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation || reservation.locationSharePrompted) return;
+  reservation.locationSharePrompted = true;
+  saveReservations();
+  confirmAction(
+    "Ubicacion en viaje",
+    "�Deseas compartir tu ubicacion durante este viaje?",
+    "Se comparte solo durante esta contratacion activa y se detiene al finalizar el trabajo.",
+    () => enableOperationLocationSharing(reservationId),
+    "Compartir ubicacion"
+  );
+}
+
+function enableOperationLocationSharing(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  reservation.locationSharingActive = true;
+  reservation.locationSharedAt = new Date().toISOString();
+  saveReservations();
+  renderMisOfertas();
+  renderReservations();
+  createNotification({
+    user_id: clean(reservation.requestedBy) || currentUserId(),
+    type: "system",
+    title: "Ubicacion compartida",
+    body: "El contratista comparte su ubicacion durante el viaje.",
+    priority: "MEDIUM",
+    related_id: reservation.id,
+  });
+  showToast("Ubicacion compartida durante esta contratacion.");
+}
+
+function showOperationUndoToast(message, onUndo) {
+  const toast = $("#toast");
+  if (!toast) return;
+  if (lastOperationUndo?.timer) clearTimeout(lastOperationUndo.timer);
+  lastOperationUndo = { onUndo };
+  toast.innerHTML = `${escapeHTML(message)} <button class="toast-action" type="button">Deshacer</button>`;
+  toast.hidden = false;
+  toast.style.animation = "none";
+  toast.offsetHeight;
+  toast.style.animation = "";
+  toast.querySelector("button")?.addEventListener("click", () => {
+    const action = lastOperationUndo?.onUndo;
+    lastOperationUndo = null;
+    toast.hidden = true;
+    if (typeof action === "function") action();
+  });
+  clearTimeout(toastTimer);
+  lastOperationUndo.timer = setTimeout(() => {
+    toast.hidden = true;
+    lastOperationUndo = null;
+  }, 10000);
+}
+
+function openOperationSheet(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  $("#operation-sheet-reservation-id").value = reservation.id;
+  renderOperationSheet(reservation);
+  $("#operation-sheet-modal").hidden = false;
+}
+
+function closeOperationSheet() {
+  const modal = $("#operation-sheet-modal");
+  if (modal) modal.hidden = true;
+}
+
+function renderOperationSheet(reservation) {
+  const currentKey = currentOperationState(reservation).key;
+  $("#operation-state-list").innerHTML = operationFlow.map((item) => `
+    <button class="btn ${item.key === currentKey ? "primary" : "ghost"} operation-state-choice" type="button" data-operation-state="${item.key}">
+      <i class="fa-solid ${item.icon}"></i> ${escapeHTML(item.label)}
+    </button>
+  `).join("");
+  $("#operation-incident-list").innerHTML = operationIncidents.map((reason) => `
+    <button class="btn ghost operation-incident-choice" type="button" data-incident="${escapeHTML(reason)}">
+      <i class="fa-solid fa-triangle-exclamation"></i> ${escapeHTML(reason)}
+    </button>
+  `).join("");
+}
+
+function bindOperationSheet() {
+  $("#operation-sheet-close")?.addEventListener("click", closeOperationSheet);
+  $("#operation-sheet-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "operation-sheet-modal") closeOperationSheet();
+  });
+  $("#operation-state-list")?.addEventListener("click", (event) => {
+    const button = event.target.closest(".operation-state-choice");
+    if (!button) return;
+    const reservationId = $("#operation-sheet-reservation-id").value;
+    closeOperationSheet();
+    applyOperationState(reservationId, button.dataset.operationState);
+  });
+  $("#operation-incident-list")?.addEventListener("click", (event) => {
+    const button = event.target.closest(".operation-incident-choice");
+    if (!button) return;
+    const reservationId = $("#operation-sheet-reservation-id").value;
+    closeOperationSheet();
+    reportOperationIncident(reservationId, button.dataset.incident);
+  });
+}
+
+function reportOperationIncident(reservationId, reason) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  const incident = { reason: clean(reason), createdAt: new Date().toISOString(), reportedBy: currentUserId() };
+  reservation.operationIncidents = [incident, ...(reservation.operationIncidents || [])];
+  reservation.operationUpdatedAt = incident.createdAt;
+  saveReservations();
+  createNotification({
+    user_id: clean(reservation.requestedBy) || currentUserId(),
+    type: "system",
+    title: "Incidencia reportada",
+    body: incident.reason + " en " + reservation.machineTitle + ".",
+    priority: "HIGH",
+    related_id: reservation.id,
+  });
+  renderMisOfertas();
+  renderReservations();
+  showToast("Incidencia reportada al productor.");
+}
 function contractorScheduleActions(reservation) {
   if (reservation.status === "schedule_counter") {
     return `<p class="reservation-rejected neutral"><i class="fa-regular fa-clock"></i> Esperando respuesta del productor.</p>`;
@@ -2014,7 +2715,7 @@ function pendingRequestsForMachine(machineId) {
 }
 
 function isContractorNegotiationStatus(reservation) {
-  return ["pending", "schedule_counter", "original_kept"].includes(reservation?.status) || Boolean(pendingRescheduleFor(reservation?.id));
+  return ["pending", "schedule_counter", "original_kept", "accepted", "working"].includes(reservation?.status) || Boolean(pendingRescheduleFor(reservation?.id));
 }
 
 function hasPendingRequestsForMachine(machineId) {
@@ -2053,22 +2754,24 @@ function markAvailabilitySlotPartiallyBooked(machineId) {
   saveAvailabilitySlots();
 }
 /* ─── RESERVAS ─── */
+
 function renderReservations() {
   const list  = $("#reservations-list");
   const note  = $("#reservas-note");
-  note.textContent = "Aquí ves tus solicitudes como productor y las que recibís como contratista.";
+  note.textContent = "Aqui ves tus solicitudes como productor y las que recibis como contratista.";
 
-  const hasReservations = state.reservations.length > 0;
+  const visibleReservations = state.reservations.filter(visibleReservationForActiveUser);
+  const hasReservations = visibleReservations.length > 0;
   $("#reservations-empty").hidden = hasReservations;
-  $("#reservations-empty-text").textContent = "Todavía no hiciste ninguna solicitud de maquinaria.";
+  $("#reservations-empty-text").textContent = "Todavia no hiciste ninguna solicitud de maquinaria.";
   $("#reservations-empty-cta").dataset.nav  = "catalogo";
 
-  list.innerHTML = state.reservations.map((r) => reservationCard(r)).join("");
+  list.innerHTML = visibleReservations.map((r) => reservationCard(r)).join("");
 
   $$(".accept-reservation").forEach((btn) => btn.addEventListener("click", () => setReservationStatus(btn.dataset.reservationId, "accepted")));
   $$(".reject-reservation").forEach((btn) => btn.addEventListener("click", () =>
-    confirmAction("Rechazar solicitud", "¿Rechazar esta solicitud?",
-      `${btn.dataset.title} para ${formatDate(btn.dataset.date)}. No se puede deshacer.`,
+    confirmAction("Rechazar solicitud", "Rechazar esta solicitud?",
+      btn.dataset.title + " para " + formatDate(btn.dataset.date) + ". No se puede deshacer.",
       () => setReservationStatus(btn.dataset.reservationId, "rejected"),
       "Rechazar"
     )));
@@ -2076,7 +2779,7 @@ function renderReservations() {
   $$(".finish-work-reservation").forEach((btn) => btn.addEventListener("click", () => setReservationStatus(btn.dataset.reservationId, "done")));
   $$(".delete-finished-reservation").forEach((btn) => btn.addEventListener("click", () =>
     confirmAction("Eliminar reserva", "Eliminar reserva del historial",
-      `${btn.dataset.title}. Esta accion quita la reserva del historial local.`,
+      btn.dataset.title + ". Esta accion quita la reserva del historial local.",
       () => deleteReservation(btn.dataset.reservationId),
       "Eliminar"
     )));
@@ -2730,11 +3433,22 @@ function submitDelayRecord(e) {
 }
 
 
+
 function bindReviewModal() {
   const form = $("#review-form");
   if (!form) return;
   form.addEventListener("submit", submitReview);
-  form.addEventListener("input", hideReviewError);
+  form.addEventListener("input", () => {
+    hideReviewError();
+    updateReviewProgress();
+  });
+  form.addEventListener("change", () => {
+    hideReviewError();
+    updateReviewProgress();
+  });
+  form.addEventListener("click", handleReviewFormClick);
+  form.addEventListener("pointerover", handleStarHover);
+  form.addEventListener("pointerout", handleStarHoverOut);
   formControl(form, "comment")?.addEventListener("input", updateReviewCommentCounter);
   $("#review-close")?.addEventListener("click", closeReviewModal);
   $("#review-cancel")?.addEventListener("click", closeReviewModal);
@@ -2742,6 +3456,7 @@ function bindReviewModal() {
     if (e.target.id === "review-modal") closeReviewModal();
   });
 }
+
 
 function openReviewModal(reservationId, reviewerRole) {
   const reservation = state.reservations.find((item) => item.id === reservationId);
@@ -2759,17 +3474,21 @@ function openReviewModal(reservationId, reviewerRole) {
   form.reset();
   formControl(form, "reservationId").value = reservation.id;
   formControl(form, "reviewerRole").value = role;
+  formControl(form, "overallRating").value = "";
   $("#review-title").textContent = role === "producer" ? "Evaluar contratista" : "Evaluar productor";
   $("#review-context").textContent = "Esta evaluacion queda asociada a una contratacion finalizada dentro de Agronex.";
   $("#review-target-type").textContent = target.reviewedUserType;
   $("#review-target-name").textContent = target.reviewedName;
   $("#review-target-job").textContent = reservation.machineTitle + " - " + formatDateRange(reservation);
   $("#review-work-again-label").textContent = "?Volverias a trabajar con este " + target.reviewedUserType.toLowerCase() + "?";
+  renderStarRating($(".star-rating[data-rating-name='overallRating']"), "overallRating");
   renderReviewCategoryFields(role);
+  renderReviewTags(role);
   updateReviewCommentCounter();
+  updateReviewProgress();
   hideReviewError();
   $("#review-modal").hidden = false;
-  formControl(form, "overallRating").focus();
+  $("#review-modal .review-choice input")?.focus();
 }
 
 function closeReviewModal() {
@@ -2778,11 +3497,20 @@ function closeReviewModal() {
   hideReviewError();
 }
 
+
+
 function renderReviewCategoryFields(reviewerRole) {
   const target = $("#review-category-fields");
   if (!target) return;
   const categories = reviewCategoriesByRole[reviewerRole] || reviewCategoriesByRole.producer;
-  target.innerHTML = categories.map(([key, label]) => "\n    <label>\n      <span>" + escapeHTML(label) + "</span>\n      <select name=\"review_" + escapeHTML(key) + "\" required>\n        <option value=\"\">Estrellas</option>\n        <option value=\"5\">5 estrellas</option>\n        <option value=\"4\">4 estrellas</option>\n        <option value=\"3\">3 estrellas</option>\n        <option value=\"2\">2 estrellas</option>\n        <option value=\"1\">1 estrella</option>\n      </select>\n    </label>\n  ").join("");
+  target.innerHTML = categories.map(([key, label]) => [
+    '<div class="review-rating-field review-category-field">',
+    '<span>' + escapeHTML(label) + '</span>',
+    '<input name="review_' + escapeHTML(key) + '" type="hidden" required>',
+    '<div class="star-rating" data-rating-name="review_' + escapeHTML(key) + '" role="radiogroup" aria-label="' + escapeHTML(label) + '"></div>',
+    '</div>',
+  ].join("")).join("");
+  categories.forEach(([key]) => renderStarRating(target.querySelector('.star-rating[data-rating-name="review_' + key + '"]'), "review_" + key));
 }
 
 function submitReview(e) {
@@ -2831,6 +3559,7 @@ function submitReview(e) {
     reviewedRole: target.reviewedRole,
     overallRating,
     categories,
+    tags: selectedReviewTags(),
     wouldWorkAgain: wouldWorkAgain === "yes",
     comment,
     createdAt: new Date().toISOString(),
@@ -2843,6 +3572,96 @@ function submitReview(e) {
   renderMisOfertas();
   renderCatalog();
   showToast("Evaluacion enviada. Gracias, suma confianza al perfil.");
+}
+
+function handleReviewFormClick(e) {
+  const star = e.target.closest(".star-btn");
+  if (star && star.closest("#review-form")) {
+    setStarRating(star.dataset.ratingName, Number(star.dataset.ratingValue));
+    return;
+  }
+  const chip = e.target.closest(".review-tag-chip");
+  if (!chip || !chip.closest("#review-form")) return;
+  chip.classList.toggle("selected");
+  chip.setAttribute("aria-pressed", chip.classList.contains("selected") ? "true" : "false");
+  updateReviewProgress();
+}
+
+function handleStarHover(e) {
+  const star = e.target.closest(".star-btn");
+  if (!star || !star.closest("#review-form")) return;
+  updateStarRatingUI(star.dataset.ratingName, Number(star.dataset.ratingValue));
+}
+
+function handleStarHoverOut(e) {
+  const group = e.target.closest(".star-rating");
+  if (!group || !group.closest("#review-form")) return;
+  updateStarRatingUI(group.dataset.ratingName);
+}
+
+
+function renderStarRating(container, name) {
+  if (!container) return;
+  container.dataset.ratingName = name;
+  container.innerHTML = [1, 2, 3, 4, 5].map((value) =>
+    '<button class="star-btn" type="button" data-rating-name="' + escapeHTML(name) + '" data-rating-value="' + value + '" role="radio" aria-checked="false" aria-label="' + value + ' de 5">&#9733;</button>'
+  ).join("");
+  updateStarRatingUI(name);
+}
+
+function setStarRating(name, value) {
+  const form = $("#review-form");
+  const input = formControl(form, name);
+  if (!input || !validRating(value)) return;
+  input.value = String(value);
+  updateStarRatingUI(name);
+  updateReviewProgress();
+  hideReviewError();
+}
+
+
+function updateStarRatingUI(name, previewValue = null) {
+  const form = $("#review-form");
+  if (!form || !name) return;
+  const selected = Number(formControl(form, name)?.value);
+  const preview = validRating(previewValue) ? previewValue : null;
+  $$('.star-rating[data-rating-name="' + name + '"] .star-btn').forEach((button) => {
+    const value = Number(button.dataset.ratingValue);
+    button.classList.toggle("selected", validRating(selected) && value <= selected);
+    button.classList.toggle("preview", preview !== null && value <= preview);
+    button.setAttribute("aria-checked", validRating(selected) && selected === value ? "true" : "false");
+  });
+}
+
+
+function renderReviewTags(reviewerRole) {
+  const target = $("#review-tags");
+  if (!target) return;
+  const tags = reviewTagsByRole[reviewerRole] || [];
+  target.innerHTML = tags.map((tag) =>
+    '<button class="review-tag-chip" type="button" data-tag="' + escapeHTML(tag) + '" aria-pressed="false">' + escapeHTML(tag) + '</button>'
+  ).join("");
+}
+
+function selectedReviewTags() {
+  return $$("#review-tags .review-tag-chip.selected")
+    .map((button) => clean(button.dataset.tag))
+    .filter(Boolean);
+}
+
+function updateReviewProgress() {
+  const progress = $("#review-progress");
+  const form = $("#review-form");
+  if (!progress || !form) return;
+  const reviewerRole = formControl(form, "reviewerRole")?.value === "contractor" ? "contractor" : "producer";
+  const wouldWorkAgain = Boolean(form.querySelector('input[name="wouldWorkAgain"]:checked'));
+  const overallDone = validRating(Number(formControl(form, "overallRating")?.value));
+  const categoryDone = (reviewCategoriesByRole[reviewerRole] || []).every(([key]) => validRating(Number(formControl(form, "review_" + key)?.value)));
+  let step = 1;
+  if (wouldWorkAgain) step = 2;
+  if (wouldWorkAgain && overallDone) step = 3;
+  if (wouldWorkAgain && overallDone && categoryDone) step = 5;
+  progress.textContent = "Paso " + step + " de 5";
 }
 
 function updateReviewCommentCounter() {
@@ -3114,6 +3933,51 @@ function responseMinutesForReservation(reservation) {
   return Math.max(0, Math.round((response.getTime() - created.getTime()) / 60000));
 }
 
+
+function weightedReviewCategoryAverage(reviews, reviewedRole) {
+  const weights = reviewCategoryWeightsByReviewedRole[reviewedRole] || {};
+  const values = [];
+  reviews.forEach((review) => {
+    let weightedSum = 0;
+    let totalWeight = 0;
+    Object.entries(weights).forEach(([key, weight]) => {
+      const value = Number(review.categories?.[key]);
+      if (!validRating(value)) return;
+      weightedSum += value * weight;
+      totalWeight += weight;
+    });
+    if (totalWeight > 0) values.push(weightedSum / totalWeight);
+  });
+  return average(values);
+}
+
+function responseReputationScore(minutes) {
+  if (!Number.isFinite(minutes)) return null;
+  if (minutes <= 120) return 100;
+  if (minutes <= 720) return 85;
+  if (minutes <= 1440) return 70;
+  if (minutes <= 2880) return 50;
+  return 30;
+}
+
+function calculateReputationScore(reviews, metrics, reviewedRole, averageRating, wouldAgainPercent) {
+  const categoryAverage = weightedReviewCategoryAverage(reviews, reviewedRole);
+  const components = [
+    { value: typeof averageRating === "number" ? (averageRating / 5) * 100 : null, weight: 0.24 },
+    { value: typeof categoryAverage === "number" ? (categoryAverage / 5) * 100 : null, weight: 0.18 },
+    { value: typeof wouldAgainPercent === "number" ? wouldAgainPercent : null, weight: 0.16 },
+    { value: Math.min(100, (metrics.completedCount || 0) * 12), weight: 0.12 },
+    { value: Math.min(100, reviews.length * 14), weight: 0.08 },
+    { value: typeof metrics.acceptanceRate === "number" ? metrics.acceptanceRate : null, weight: 0.09 },
+    { value: typeof metrics.cancellationRate === "number" ? Math.max(0, 100 - metrics.cancellationRate) : null, weight: 0.08 },
+    { value: responseReputationScore(metrics.averageResponseMinutes), weight: 0.05 },
+  ].filter((item) => Number.isFinite(item.value));
+  if (!components.length) return null;
+  const totalWeight = components.reduce((sum, item) => sum + item.weight, 0);
+  return Math.round(components.reduce((sum, item) => sum + item.value * item.weight, 0) / totalWeight);
+}
+
+
 function profileReputationSummary(kind, name) {
   const reviews = reviewsForProfile(kind, name);
   const metrics = automaticReputationMetrics(kind, name);
@@ -3128,16 +3992,19 @@ function profileReputationSummary(kind, name) {
     metrics,
     completedCount: metrics.completedCount,
     averageRating: avg,
+    reputationScore: calculateReputationScore(reviews, metrics, kind, avg, wouldAgain),
     evaluationCount: reviews.length,
     wouldAgainPercent: wouldAgain,
     latestActivity: latest,
   };
 }
 
+
 function reputationStatsForProfile(kind, name) {
   const summary = profileReputationSummary(kind, name);
   const metrics = summary.metrics;
   return [
+    { label: "Reputacion", value: typeof summary.reputationScore === "number" ? summary.reputationScore + "/100" : "" },
     { label: "Promedio general", value: typeof summary.averageRating === "number" ? summary.averageRating.toFixed(1) + "/5" : "" },
     { label: "Trabajos completados", value: metrics.completedCount ? String(metrics.completedCount) : "" },
     { label: "Evaluaciones", value: summary.evaluationCount ? String(summary.evaluationCount) : "" },
@@ -3194,36 +4061,27 @@ function formatResponseTime(minutes) {
   return days + " dia" + (days === 1 ? "" : "s");
 }
 
+
 function syncMachineRatingsFromReviews() {
   state.machines.forEach((machine) => {
     const reviews = reviewsForProfile("contractor", machine.owner);
     if (!reviews.length) return;
-    machine.rating = Number(average(reviews.map((item) => Number(item.overallRating))).toFixed(1));
+    const summary = profileReputationSummary("contractor", machine.owner);
+    machine.rating = typeof summary.reputationScore === "number"
+      ? Number((summary.reputationScore / 20).toFixed(1))
+      : Number(average(reviews.map((item) => Number(item.overallRating))).toFixed(1));
     machine.reviews = reviews.length;
   });
   saveMachines();
 }
 
+
 function emitReviewNotificationsForCompletedJob(reservation) {
   if (!reviewForReservation(reservation.id, "producer")) {
-    createNotification({
-      user_id: currentUserId(),
-      type: "review",
-      title: "Califica al contratista",
-      body: reservation.machineTitle + " finalizo. Deja una evaluacion verificada.",
-      priority: "MEDIUM",
-      related_id: reservation.id,
-    });
+    createNotification({ user_id: clean(reservation.requestedBy) || currentUserId(), type: "review", title: "Califica al contratista", body: reservation.machineTitle + " finalizo. Deja una evaluacion verificada.", priority: "MEDIUM", related_id: reservation.id });
   }
   if (!reviewForReservation(reservation.id, "contractor")) {
-    createNotification({
-      user_id: currentUserId(),
-      type: "review",
-      title: "Califica al productor",
-      body: reservation.machineTitle + " finalizo. Registra como fue la coordinacion.",
-      priority: "MEDIUM",
-      related_id: reservation.id,
-    });
+    createNotification({ user_id: clean(reservation.ownerId) || clean(findMachine(reservation.machineId)?.ownerId) || currentUserId(), type: "review", title: "Califica al productor", body: reservation.machineTitle + " finalizo. Registra como fue la coordinacion.", priority: "MEDIUM", related_id: reservation.id });
   }
 }
 
@@ -3462,6 +4320,7 @@ function reservationFromForm(form, machine) {
     machineId:    machine.id,
     machineTitle: machine.title,
     owner:        machine.owner,
+    ownerId:      machine.ownerId || "",
     category:     machine.category,
     status:       "pending",
     date:         formControl(form, "date").value,
@@ -4316,80 +5175,34 @@ function emitAppEvent(eventName, payload = {}) {
   return createNotification(notification);
 }
 
+
 function notificationFromEvent(eventName, payload) {
   const reservation = payload.reservation || {};
   const machine = payload.machine || findMachine(reservation.machineId) || {};
   const machineTitle = clean(reservation.machineTitle || machine.title || "Trabajo");
   const requester = clean(reservation.requestedByName || reservation.requestedBy || currentUserLabel());
+  const contractorUserId = clean(reservation.ownerId || machine.ownerId) || currentUserId();
+  const requesterUserId = clean(reservation.requestedBy) || currentUserId();
   if (eventName === "job.created") {
-    return {
-      user_id: currentUserId(),
-      type: "job_request",
-      title: "Nueva solicitud de trabajo",
-      body: `${requester} solicito ${machineTitle}. Revisala antes de cambiar la oferta.`,
-      priority: "HIGH",
-      related_id: reservation.id,
-    };
+    return { user_id: contractorUserId, type: "job_request", title: "Nueva solicitud de trabajo", body: requester + " solicito " + machineTitle + ". Revisala antes de cambiar la oferta.", priority: "HIGH", related_id: reservation.id };
   }
   if (eventName === "job.accepted") {
-    return {
-      user_id: currentUserId(),
-      type: "job_accepted",
-      title: "Solicitud aceptada",
-      body: `${machineTitle} fue aceptada y ya figura en tus reservas.`,
-      priority: "MEDIUM",
-      related_id: reservation.id,
-    };
+    return { user_id: requesterUserId, type: "job_accepted", title: "Solicitud aceptada", body: machineTitle + " fue aceptada y ya figura en tus reservas.", priority: "MEDIUM", related_id: reservation.id };
   }
   if (eventName === "job.cancelled") {
-    return {
-      user_id: currentUserId(),
-      type: "job_cancelled",
-      title: "Solicitud rechazada",
-      body: `${machineTitle} fue rechazada. La fecha original no cambia.`,
-      priority: "HIGH",
-      related_id: reservation.id,
-    };
+    return { user_id: requesterUserId, type: "job_cancelled", title: "Solicitud rechazada", body: machineTitle + " fue rechazada. La fecha original no cambia.", priority: "HIGH", related_id: reservation.id };
   }
   if (eventName === "schedule.proposed") {
-    return {
-      user_id: currentUserId(),
-      type: "system",
-      title: "Nuevo horario propuesto",
-      body: `El contratista propuso ${scheduleProposalLabel(reservation.scheduleProposal)} para ${machineTitle}.`,
-      priority: "MEDIUM",
-      related_id: reservation.id,
-    };
+    return { user_id: requesterUserId, type: "system", title: "Nuevo horario propuesto", body: "El contratista propuso " + scheduleProposalLabel(reservation.scheduleProposal) + " para " + machineTitle + ".", priority: "MEDIUM", related_id: reservation.id };
   }
   if (eventName === "schedule.accepted") {
-    return {
-      user_id: currentUserId(),
-      type: "job_accepted",
-      title: "Horario aceptado",
-      body: `${machineTitle} quedo confirmado con el horario propuesto.`,
-      priority: "MEDIUM",
-      related_id: reservation.id,
-    };
+    return { user_id: contractorUserId, type: "job_accepted", title: "Horario aceptado", body: machineTitle + " quedo confirmado con el horario propuesto.", priority: "MEDIUM", related_id: reservation.id };
   }
   if (eventName === "schedule.original_kept") {
-    return {
-      user_id: currentUserId(),
-      type: "system",
-      title: "Horario original mantenido",
-      body: `El productor mantuvo el horario original de ${machineTitle}.`,
-      priority: "MEDIUM",
-      related_id: reservation.id,
-    };
+    return { user_id: contractorUserId, type: "system", title: "Horario original mantenido", body: "El productor mantuvo el horario original de " + machineTitle + ".", priority: "MEDIUM", related_id: reservation.id };
   }
   if (eventName === "message.created") {
-    return {
-      user_id: currentUserId(),
-      type: "message",
-      title: payload.title || "Nuevo mensaje",
-      body: payload.body || "Tenes un mensaje nuevo en la conversacion.",
-      priority: payload.priority || "LOW",
-      related_id: payload.related_id || null,
-    };
+    return { user_id: payload.user_id || currentUserId(), type: "message", title: payload.title || "Nuevo mensaje", body: payload.body || "Tenes un mensaje nuevo en la conversacion.", priority: payload.priority || "LOW", related_id: payload.related_id || null };
   }
   return null;
 }
@@ -4650,15 +5463,17 @@ function timeAgo(value) {
   if (hours < 24) return `${hours} h`;
   return formatDate(value);
 }
+
 function updateBadges() {
-  const pendingCount = state.reservations.filter(isContractorNegotiationStatus).length;
+  const pendingAsContractor = state.reservations.filter((reservation) => activeUserOwnsReservationMachine(reservation) && isContractorNegotiationStatus(reservation)).length;
+  const pendingVisible = state.reservations.filter((reservation) => visibleReservationForActiveUser(reservation) && isContractorNegotiationStatus(reservation)).length;
   const badge = $("#reservation-badge");
-  badge.hidden = pendingCount === 0;
-  badge.textContent = pendingCount;
+  badge.hidden = pendingVisible === 0;
+  badge.textContent = pendingVisible;
 
   const offersBadge = $("#offers-badge");
-  offersBadge.hidden = pendingCount === 0;
-  offersBadge.textContent = pendingCount;
+  offersBadge.hidden = pendingAsContractor === 0;
+  offersBadge.textContent = pendingAsContractor;
 
   const notificationCount = unreadNotificationsCount();
   const notificationBadge = $("#notification-badge");
@@ -4668,7 +5483,6 @@ function updateBadges() {
   }
 }
 
-/* ─── STORAGE ─── */
 function saveMachines() {
   localStorage.setItem(STORAGE_KEYS.machines, JSON.stringify(state.machines));
   renderCategoryFilters();
@@ -4691,16 +5505,25 @@ function saveAvailabilitySlots() {
 function saveNotifications() {
   localStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(state.notifications));
 }
+
 function saveAuth() {
   if (state.auth) {
     localStorage.setItem(STORAGE_KEYS.auth, JSON.stringify(state.auth));
+    if (devUserSwitcherEnabled && state.auth.devUserId) localStorage.setItem(STORAGE_KEYS.devActiveUser, state.auth.devUserId);
   } else {
     localStorage.removeItem(STORAGE_KEYS.auth);
   }
 }
 function saveProfile() {
+  if (devUserSwitcherEnabled && state.auth?.devUserId) {
+    const profiles = readObject(STORAGE_KEYS.devProfiles, {});
+    profiles[state.auth.devUserId] = state.profile;
+    localStorage.setItem(STORAGE_KEYS.devProfiles, JSON.stringify(profiles));
+    return;
+  }
   localStorage.setItem("nexudrive_mvp_profile", JSON.stringify(state.profile));
 }
+
 function findMachine(id) {
   return state.machines.find((m) => m.id === id);
 }
@@ -4823,6 +5646,12 @@ function formatDate(value) {
   return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+function formatTime(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+}
 function formatUrgency(value) {
   const map = {
     flexible: "Flexible",

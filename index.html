@@ -49,6 +49,13 @@
     </nav>
 
     <div class="topbar-right">
+      <div class="dev-user-switcher" id="dev-user-switcher" hidden>
+        <button class="dev-user-button" id="dev-user-button" type="button" aria-haspopup="true" aria-expanded="false">
+          <span id="dev-user-label">Usuario activo</span>
+          <i class="fa-solid fa-chevron-down"></i>
+        </button>
+        <div class="dev-user-menu" id="dev-user-menu" hidden></div>
+      </div>
       <button class="notification-button" id="notification-toggle" type="button" aria-label="Abrir notificaciones" aria-expanded="false">
         <i class="fa-regular fa-bell"></i>
         <strong id="notification-badge" class="badge" hidden>0</strong>
@@ -955,6 +962,7 @@
         <div>
           <p class="eyebrow">Evaluacion verificada</p>
           <h2 id="review-title">Calificar usuario</h2>
+          <small class="review-progress" id="review-progress">Paso 1 de 5</small>
         </div>
         <button class="icon-btn" type="button" id="review-close" aria-label="Cerrar evaluacion">
           <i class="fa-solid fa-xmark"></i>
@@ -968,17 +976,6 @@
         <strong id="review-target-name">Usuario Agronex</strong>
         <small id="review-target-job">Trabajo finalizado</small>
       </div>
-      <label class="full-field">
-        <span>Calificacion general</span>
-        <select name="overallRating" required>
-          <option value="">Seleccionar estrellas</option>
-          <option value="5">★★★★★ Excelente</option>
-          <option value="4">★★★★ Muy buena</option>
-          <option value="3">★★★ Correcta</option>
-          <option value="2">★★ Regular</option>
-          <option value="1">★ Mala</option>
-        </select>
-      </label>
       <fieldset class="review-choice">
         <legend id="review-work-again-label">¿Volverias a trabajar con este usuario?</legend>
         <label>
@@ -990,7 +987,16 @@
           <span>No</span>
         </label>
       </fieldset>
+      <div class="review-rating-field">
+        <span>Calificacion general</span>
+        <input name="overallRating" type="hidden" required>
+        <div class="star-rating" data-rating-name="overallRating" role="radiogroup" aria-label="Calificacion general"></div>
+      </div>
       <div class="review-category-grid" id="review-category-fields"></div>
+      <section class="review-tags-section">
+        <span>Etiquetas rapidas</span>
+        <div class="review-tags" id="review-tags"></div>
+      </section>
       <label class="full-field">
         <span>Comentario (opcional)</span>
         <textarea name="comment" rows="4" maxlength="300" placeholder="Resumen breve de la experiencia, sin datos personales."></textarea>
@@ -998,7 +1004,7 @@
       </label>
       <p class="form-error" id="review-error" hidden></p>
       <p class="review-note">Solo se puede evaluar una vez y no se puede editar despues de enviar.</p>
-      <div class="form-actions">
+      <div class="form-actions review-submit-bar">
         <button class="btn ghost" type="button" id="review-cancel">Cancelar</button>
         <button class="btn primary" type="submit">
           <span class="btn-label"><i class="fa-solid fa-star"></i> Enviar evaluacion</span>
@@ -1045,6 +1051,30 @@
         </button>
       </div>
     </form>
+  </div>
+
+  <!-- BOTTOM SHEET SEGUIMIENTO OPERATIVO -->
+  <div class="modal-backdrop operation-sheet-backdrop" id="operation-sheet-modal" hidden>
+    <div class="modal operation-sheet" role="dialog" aria-modal="true" aria-labelledby="operation-sheet-title">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Seguimiento operativo</p>
+          <h2 id="operation-sheet-title">Actualizar estado</h2>
+        </div>
+        <button class="icon-btn" type="button" id="operation-sheet-close" aria-label="Cerrar seguimiento">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <input type="hidden" id="operation-sheet-reservation-id">
+      <section class="operation-sheet-section">
+        <h3>Estados disponibles</h3>
+        <div class="operation-state-list" id="operation-state-list"></div>
+      </section>
+      <section class="operation-sheet-section">
+        <h3>Reportar incidencia</h3>
+        <div class="operation-incident-list" id="operation-incident-list"></div>
+      </section>
+    </div>
   </div>
 
   <!-- MODAL CONFIRMAR ACCION -->
