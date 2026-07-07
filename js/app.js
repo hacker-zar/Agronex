@@ -45,7 +45,7 @@ const seedMachines = [
     availability: "Disponible ma\u00f1ana",
     availableTomorrow: true,
     owner: "Agroservicios Norte",
-    description: "Tractor de 120 HP para labores generales, listo para coordinar por hectÃ¡rea.",
+    description: "Tractor de 120 HP para labores generales, listo para coordinar por hectárea.",
     highlight: "Disponible para labores generales",
     distanceKm: 18, rating: 4.7, reviews: 23, operator: true, brand: "John Deere", year: 2020,
     offerStatus: "active",
@@ -60,10 +60,10 @@ const seedMachines = [
     availability: "Disponible",
     availableToday: true,
     owner: "Contratistas Pergamino",
-    description: "Equipo para granos gruesos con mantenimiento al dÃ­a y operador opcional.",
+    description: "Equipo para granos gruesos con mantenimiento al día y operador opcional.",
     highlight: "Ahorras $320.000",
     distanceKm: 28, rating: 4.8, reviews: 34, operator: true, brand: "John Deere", year: 2019,
-    badge: "Respuesta rÃ¡pida",
+    badge: "Respuesta rápida",
     offerStatus: "active",
   },
   {
@@ -72,11 +72,11 @@ const seedMachines = [
     category: "Cosechadora",
     price: 120,
     priceUnit: "hectarea",
-    location: "JunÃ­n, Buenos Aires",
-    availability: "Disponible desde la prÃ³xima semana",
+    location: "Junín, Buenos Aires",
+    availability: "Disponible desde la próxima semana",
     owner: "La Campana Servicios",
-    description: "Cosechadora axial para soja y maÃ­z. PublicaciÃ³n orientada a reservas simples.",
-    highlight: "Equipo listo para campaÃ±a",
+    description: "Cosechadora axial para soja y maíz. Publicación orientada a reservas simples.",
+    highlight: "Equipo listo para campaña",
     distanceKm: 45, rating: 4.9, reviews: 51, operator: true, brand: "Case IH", year: 2021,
     offerStatus: "active",
   },
@@ -90,21 +90,21 @@ const seedMachines = [
     availability: "Disponible",
     availableToday: true,
     owner: "Rojas Agro",
-    description: "Pulverizadora autopropulsada para aplicaciones terrestres por hectÃ¡rea.",
+    description: "Pulverizadora autopropulsada para aplicaciones terrestres por hectárea.",
     highlight: "Ahorras $95.000",
     distanceKm: 12, rating: 4.7, reviews: 28, operator: false, brand: "Jacto", year: 2020,
     offerStatus: "active",
   },
   {
     id: "m-camion-scania",
-    title: "CamiÃ³n Scania R450 con acoplado",
+    title: "Camión Scania R450 con acoplado",
     category: "Camion",
     price: 3500,
     priceUnit: "kilometro",
     location: "Rosario, Santa Fe",
     availability: "Disponible para la cosecha",
     owner: "Transportes Del Campo",
-    description: "CamiÃ³n de larga distancia ideal para traslado de granos entre acopios. Capacidad 30 tn.",
+    description: "Camión de larga distancia ideal para traslado de granos entre acopios. Capacidad 30 tn.",
     distanceKm: 8, rating: 4.6, reviews: 17, operator: true, brand: "Scania", year: 2022,
     badge: "Nuevo",
     offerStatus: "paused",
@@ -115,7 +115,7 @@ const seedMachines = [
     category: "Embolsadora",
     price: 7500,
     priceUnit: "tonelada",
-    location: "CÃ³rdoba Capital",
+    location: "Córdoba Capital",
     availability: "Disponible esta cosecha",
     owner: "Agrobolsas Sur",
     description: "Embolsadora de alto rendimiento para almacenaje a campo. Capacidad 900 tn/h.",
@@ -394,7 +394,7 @@ function init() {
   openLocationDemoFromQuery();
 }
 
-/* âââ NAVIGATION âââ */
+/* NAVIGATION */
 
 function initialAuth() {
   if (!devUserSwitcherEnabled) return readObject(STORAGE_KEYS.auth, null);
@@ -815,7 +815,7 @@ function showScreen(screen) {
   if (screen === "acceso")      renderAuth();
 }
 
-/* âââ FORMS âââ */
+/* FORMS */
 function bindForms() {
   $("#publish-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -861,7 +861,7 @@ function bindForms() {
       formEl.reset();
       resetPublishWizard();
       setButtonLoading(submitBtn, false);
-      showToast("Â¡Maquinaria publicada! Ya aparece en el catÃ¡logo.");
+      showToast("¡Maquinaria publicada! Ya aparece en el catálogo.");
       showScreen("mis-ofertas");
     }, 500);
   });
@@ -923,7 +923,7 @@ function bindForms() {
   });
 }
 
-/* âââ PUBLISH WIZARD âââ */
+/* PUBLISH WIZARD */
 function bindPublishWizard() {
   $$("#publish-category-grid .pub-cat-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1217,7 +1217,7 @@ function syncPublishPlateField(categoryOverride) {
 function validatePublishStep() {
   const form = $("#publish-form");
   if (state.publishStep === 1 && !$("#publish-category")?.value) {
-    showToast("ElegÃ­ una categorÃ­a para continuar.");
+    showToast("Elegí una categoría para continuar.");
     return false;
   }
   if (state.publishStep === 2) {
@@ -1260,7 +1260,7 @@ function updatePublishPreview() {
   $("#publish-preview-icon").innerHTML = `<i class="fa-solid ${icon}"></i>`;
   $("#publish-preview-category").textContent = category;
   $("#publish-preview-title").textContent = clean(form.elements.title.value) || "Tu equipo publicado";
-  $("#publish-preview-description").textContent = clean(form.elements.description.value) || "CompletÃ¡ los datos para ver cÃ³mo aparecerÃ¡ en el catÃ¡logo.";
+  $("#publish-preview-description").textContent = clean(form.elements.description.value) || "Completá los datos para ver cómo aparecerá en el catálogo.";
   $("#publish-preview-location").textContent = clean(form.elements.location.value) || "Zona de trabajo";
   const availabilityWindow = availabilityWindowFromPublishForm(form);
   const availabilityLabel = availabilityWindow.startDate && availabilityWindow.endDate
@@ -1286,7 +1286,7 @@ function resetPublishWizard() {
   renderPublishStep();
 }
 
-/* âââ PROFILE âââ */
+/* PROFILE */
 
 function bindProfile() {
   const form = $("#profile-form");
@@ -1633,19 +1633,19 @@ function bindAuth() {
     const termsAccepted = Boolean(formControl(form, "termsAccepted")?.checked);
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      showAuthError("IngresÃ¡ un email vÃ¡lido.");
+      showAuthError("Ingresá un email válido.");
       return;
     }
     if (!password) {
-      showAuthError(mode === "register" ? "CreÃ¡ una contraseÃ±a para registrarte." : "IngresÃ¡ tu contraseÃ±a.");
+      showAuthError(mode === "register" ? "Creá una contraseña para registrarte." : "Ingresá tu contraseña.");
       return;
     }
     if (mode === "register" && !name) {
-      showAuthError("IngresÃ¡ tu nombre para registrarte.");
+      showAuthError("Ingresá tu nombre para registrarte.");
       return;
     }
     if (mode === "register" && password.length < 4) {
-      showAuthError("La contraseÃ±a debe tener al menos 4 caracteres.");
+      showAuthError("La contraseña debe tener al menos 4 caracteres.");
       return;
     }
 
@@ -1657,7 +1657,6 @@ function bindAuth() {
     const signedInAt = new Date().toISOString();
     state.auth = {
       email,
-      password,
       name: mode === "register" ? name : state.profile.name || email.split("@")[0],
       signedInAt,
       terms: mode === "register" ? { version: TERMS_VERSION, effectiveDate: TERMS_EFFECTIVE_DATE, acceptedAt: signedInAt, url: TERMS_URL } : state.auth?.terms,
@@ -1691,14 +1690,14 @@ function renderAuth() {
   $$(".auth-register-field").forEach((field) => { field.hidden = mode !== "register"; });
   if (passwordField) {
     const passwordLabel = passwordField.querySelector("span");
-    if (passwordLabel) passwordLabel.textContent = mode === "register" ? "Crear contraseÃ±a" : "ContraseÃ±a";
+    if (passwordLabel) passwordLabel.textContent = mode === "register" ? "Crear contraseña" : "Contraseña";
   }
   if (passwordInput) {
-    passwordInput.placeholder = mode === "register" ? "CreÃ¡ una contraseÃ±a" : "IngresÃ¡ tu contraseÃ±a";
+    passwordInput.placeholder = mode === "register" ? "Creá una contraseña" : "Ingresá tu contraseña";
   }
   $("#auth-submit .btn-label").innerHTML = mode === "register"
     ? '<i class="fa-solid fa-user-plus"></i> Crear cuenta'
-    : '<i class="fa-solid fa-arrow-right-to-bracket"></i> Iniciar sesion';
+    : '<i class="fa-solid fa-arrow-right-to-bracket"></i> Iniciar sesión';
   hideAuthError();
 }
 
@@ -1715,7 +1714,7 @@ function hideAuthError() {
   error.hidden = true;
 }
 
-/* âââ RENDER âââ */
+/* RENDER */
 function render() {
   renderCategoryFilters();
   syncCatalogFilterControls();
@@ -1749,11 +1748,11 @@ function renderProfile() {
   });
   // User chip
   $("#user-chip-avatar").textContent = state.auth ? initials : "ND";
-  $("#user-chip-name").textContent   = state.auth ? name.split(" ")[0] : "Iniciar sesion";
-  $("#user-chip").setAttribute("aria-label", state.auth ? "Entrar al perfil" : "Iniciar sesion");
+  $("#user-chip-name").textContent   = state.auth ? name.split(" ")[0] : "Iniciar sesión";
+  $("#user-chip").setAttribute("aria-label", state.auth ? "Entrar al perfil" : "Iniciar sesión");
 }
 
-/* âââ CATALOG âââ */
+/* CATALOG */
 function renderCategoryFilters() {
   const existing = new Set(state.machines.map((m) => m.category));
   const categories = categoryOrder.filter((c) => c === "Todas" || existing.has(c));
@@ -1918,7 +1917,7 @@ function machineCard(machine) {
         <i class="fa-solid ${categoryIcons[machine.category] || "fa-tractor"}"></i>
         ${machine.badge ? `<span class="machine-badge">${escapeHTML(machine.badge)}</span>` : ""}
         ${availabilityBadge}
-        <button class="floating-action report-btn" type="button" aria-label="Denunciar publicaciÃ³n" title="Denunciar" data-machine-id="${escapeHTML(machine.id)}">
+        <button class="floating-action report-btn" type="button" aria-label="Denunciar publicación" title="Denunciar" data-machine-id="${escapeHTML(machine.id)}">
           <i class="fa-solid fa-flag"></i>
         </button>
       </div>
@@ -1928,7 +1927,7 @@ function machineCard(machine) {
           <span class="category-pill">${escapeHTML(machine.category)}</span>
         </div>
         <div class="machine-meta">
-          <span><i class="fa-solid fa-location-dot"></i>${escapeHTML(machine.location)}${hasDistance ? ` Â· ${machine.distanceKm} km` : ""}</span>
+          <span><i class="fa-solid fa-location-dot"></i>${escapeHTML(machine.location)}${hasDistance ? ` · ${machine.distanceKm} km` : ""}</span>
           <span><i class="fa-regular fa-calendar-check"></i>${escapeHTML(availabilityLabel)}</span>
           <span><i class="fa-solid fa-layer-group"></i>${escapeHTML(availabilityStatus)}</span>
           <span><i class="fa-solid fa-user-tie"></i>${profileTrigger({ type: "contractor", machineId: machine.id, label: machine.owner })}</span>
@@ -1949,7 +1948,7 @@ function machineCard(machine) {
   `;
 }
 
-/* âââ MIS OFERTAS âââ */
+/* MIS OFERTAS */
 function bindOffersTabs() {
   $$("#offers-tabs .offers-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1992,8 +1991,8 @@ function bindOffersListActions() {
     if (button.matches(".reject-solicitud-btn")) {
       confirmAction(
         "Rechazar solicitud",
-        `Ã‚Â¿Rechazar la solicitud de ${button.dataset.title}?`,
-        "No se puede deshacer. El productor verÃƒÂ¡ el estado actualizado.",
+        `¿Rechazar la solicitud de ${button.dataset.title}?`,
+        "No se puede deshacer. El productor verá el estado actualizado.",
         () => setReservationStatus(button.dataset.id, "rejected"),
         "Rechazar"
       );
@@ -2014,8 +2013,8 @@ function bindOffersListActions() {
     if (button.matches(".offer-baja-btn")) {
       confirmAction(
         "Dar de baja la oferta",
-        `Ã‚Â¿QuerÃƒÂ©s dar de baja "${findMachine(button.dataset.id)?.title}"?`,
-        "La oferta dejarÃƒÂ¡ de aparecer en el catÃƒÂ¡logo. PodÃƒÂ©s reactivarla desde 'Dadas de baja'.",
+        `¿Querés dar de baja "${findMachine(button.dataset.id)?.title}"?`,
+        "La oferta dejará de aparecer en el catálogo. Podés reactivarla desde 'Dadas de baja'.",
         () => { if (setOfferStatus(button.dataset.id, "inactive")) showToast("Oferta dada de baja."); },
         "Dar de baja"
       );
@@ -2028,8 +2027,8 @@ function bindOffersListActions() {
       }
       confirmAction(
         "Eliminar definitivamente",
-        `Ã‚Â¿Eliminar "${findMachine(button.dataset.id)?.title}" de forma permanente?`,
-        "Esta acciÃƒÂ³n no se puede deshacer.",
+        `¿Eliminar "${findMachine(button.dataset.id)?.title}" de forma permanente?`,
+        "Esta acción no se puede deshacer.",
         () => {
           state.machines = state.machines.filter((m) => m.id !== button.dataset.id);
           state.availabilitySlots = state.availabilitySlots.filter((slot) => slot.machineId !== button.dataset.id);
@@ -2078,10 +2077,10 @@ function renderMisOfertas() {
 
   if (tab === "activas") {
     items = activas;
-    emptyText = "No tenÃ©s ofertas activas todavÃ­a.";
+    emptyText = "No tenés ofertas activas todavía.";
   } else if (tab === "pausadas") {
     items = pausadas;
-    emptyText = "No tenÃ©s ofertas pausadas.";
+    emptyText = "No tenés ofertas pausadas.";
   } else if (tab === "bajas") {
     items = inactivas;
     emptyText = "No diste de baja ninguna oferta.";
@@ -2763,7 +2762,7 @@ function markAvailabilitySlotPartiallyBooked(machineId) {
   slot.status = "partially_booked";
   saveAvailabilitySlots();
 }
-/* âââ RESERVAS âââ */
+/* RESERVAS */
 
 function bindReservationsListActions() {
   $("#reservations-list")?.addEventListener("click", (event) => {
@@ -3564,7 +3563,7 @@ function openReviewModal(reservationId, reviewerRole) {
   $("#review-target-type").textContent = target.reviewedUserType;
   $("#review-target-name").textContent = target.reviewedName;
   $("#review-target-job").textContent = reservation.machineTitle + " - " + formatDateRange(reservation);
-  $("#review-work-again-label").textContent = "?Volverias a trabajar con este " + target.reviewedUserType.toLowerCase() + "?";
+  $("#review-work-again-label").textContent = "¿Volverías a trabajar con este " + target.reviewedUserType.toLowerCase() + "?";
   renderStarRating($(".star-rating[data-rating-name='overallRating']"), "overallRating");
   renderReviewCategoryFields(role);
   renderReviewTags(role);
@@ -4178,7 +4177,7 @@ function setReservationStatus(id, status) {
   showToast(msgs[status] || "Estado actualizado.");
 }
 
-/* âââ REQUEST MODAL âââ */
+/* REQUEST MODAL */
 function openRequestModal(machineId) {
   const machine = findMachine(machineId);
   if (!machine) return;
@@ -5139,7 +5138,7 @@ function hideRequestError() {
   error.hidden = true;
 }
 
-/* âââ REPORT MODAL âââ */
+/* REPORT MODAL */
 function bindReportModal() {
   const form = $("#report-form");
   if (!form) return;
@@ -5209,7 +5208,7 @@ function hideReportError() {
   error.textContent = "";
   error.hidden = true;
 }
-/* âââ CONFIRM MODAL âââ */
+/* CONFIRM MODAL */
 function confirmAction(eyebrow, title, body, onConfirm, confirmLabel = "Confirmar") {
   pendingAction = onConfirm;
   $("#confirm-eyebrow").textContent = eyebrow;
@@ -5256,7 +5255,7 @@ function bindConfirmModal() {
   });
 }
 
-/* âââ BADGES âââ */
+/* BADGES */
 /* NOTIFICACIONES */
 function bindNotificationCenter() {
   $("#notification-toggle")?.addEventListener("click", toggleNotificationCenter);
@@ -5707,7 +5706,7 @@ function readObject(key, fallback) {
   return storageService.getObject(key, fallback);
 }
 
-/* âââ UTILS âââ */
+/* UTILS */
 function textKey(value) { return clean(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
 
 function hashCode(value) {
