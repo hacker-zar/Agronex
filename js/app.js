@@ -1,24 +1,38 @@
 "use strict";
 
+import { storageService } from "./services/storageService.js";
+import {
+  defaultCatalogFilters,
+  STORAGE_KEYS,
+} from "./modules/state.js";
+import { estimateServiceCost } from "./modules/pricing.js";
+import { requestQuantityFieldsForPriceUnit } from "./modules/requests.js";
+import {
+  estimatedTravelMinutes,
+  formatKm,
+  haversineKm,
+} from "./modules/location.js";
+import { offerHasPendingRequests } from "./modules/offers.js";
+import { operationVisibleForStatus } from "./modules/contracts.js";
+import {
+  calculateReputationScore,
+} from "./modules/reputation.js";
+import {
+  normalizeNotificationPriority,
+  notificationId,
+} from "./modules/notifications.js";
+import {
+  isContractorNegotiationStatus as isContractorNegotiationStatusRule,
+} from "./modules/reservations.js";
+import {
+  clean,
+  escapeHTML,
+  money,
+} from "./modules/ui.js";
+
 const TERMS_VERSION = "1.0";
 const TERMS_EFFECTIVE_DATE = "2026-06-11";
 const TERMS_URL = "legal/terminos-agronex.html";
-
-const STORAGE_KEYS = {
-  machines: "nexudrive_mvp_machines",
-  reservations: "nexudrive_mvp_reservations",
-  reschedules: "nexudrive_mvp_reschedules",
-  delays: "nexudrive_mvp_delays",
-  reviews: "nexudrive_mvp_reviews",
-  availabilitySlots: "nexudrive_mvp_availability_slots",
-  notifications: "nexudrive_mvp_notifications",
-  auth: "nexudrive_mvp_auth",
-  devActiveUser: "nexudrive_mvp_dev_active_user",
-  devRecentUsers: "nexudrive_mvp_dev_recent_users",
-  devProfiles: "nexudrive_mvp_dev_profiles",
-  devFixtures: "nexudrive_mvp_dev_fixtures",
-  theme: "nexudrive_mvp_theme",
-};
 
 const seedMachines = [
   {
@@ -31,7 +45,7 @@ const seedMachines = [
     availability: "Disponible ma\u00f1ana",
     availableTomorrow: true,
     owner: "Agroservicios Norte",
-    description: "Tractor de 120 HP para labores generales, listo para coordinar por hectárea.",
+    description: "Tractor de 120 HP para labores generales, listo para coordinar por hectÃ¡rea.",
     highlight: "Disponible para labores generales",
     distanceKm: 18, rating: 4.7, reviews: 23, operator: true, brand: "John Deere", year: 2020,
     offerStatus: "active",
@@ -46,10 +60,10 @@ const seedMachines = [
     availability: "Disponible",
     availableToday: true,
     owner: "Contratistas Pergamino",
-    description: "Equipo para granos gruesos con mantenimiento al día y operador opcional.",
+    description: "Equipo para granos gruesos con mantenimiento al dÃ­a y operador opcional.",
     highlight: "Ahorras $320.000",
     distanceKm: 28, rating: 4.8, reviews: 34, operator: true, brand: "John Deere", year: 2019,
-    badge: "Respuesta rápida",
+    badge: "Respuesta rÃ¡pida",
     offerStatus: "active",
   },
   {
@@ -58,11 +72,11 @@ const seedMachines = [
     category: "Cosechadora",
     price: 120,
     priceUnit: "hectarea",
-    location: "Junín, Buenos Aires",
-    availability: "Disponible desde la próxima semana",
+    location: "JunÃ­n, Buenos Aires",
+    availability: "Disponible desde la prÃ³xima semana",
     owner: "La Campana Servicios",
-    description: "Cosechadora axial para soja y maíz. Publicación orientada a reservas simples.",
-    highlight: "Equipo listo para campaña",
+    description: "Cosechadora axial para soja y maÃ­z. PublicaciÃ³n orientada a reservas simples.",
+    highlight: "Equipo listo para campaÃ±a",
     distanceKm: 45, rating: 4.9, reviews: 51, operator: true, brand: "Case IH", year: 2021,
     offerStatus: "active",
   },
@@ -76,21 +90,21 @@ const seedMachines = [
     availability: "Disponible",
     availableToday: true,
     owner: "Rojas Agro",
-    description: "Pulverizadora autopropulsada para aplicaciones terrestres por hectárea.",
+    description: "Pulverizadora autopropulsada para aplicaciones terrestres por hectÃ¡rea.",
     highlight: "Ahorras $95.000",
     distanceKm: 12, rating: 4.7, reviews: 28, operator: false, brand: "Jacto", year: 2020,
     offerStatus: "active",
   },
   {
     id: "m-camion-scania",
-    title: "Camión Scania R450 con acoplado",
+    title: "CamiÃ³n Scania R450 con acoplado",
     category: "Camion",
     price: 3500,
     priceUnit: "kilometro",
     location: "Rosario, Santa Fe",
     availability: "Disponible para la cosecha",
     owner: "Transportes Del Campo",
-    description: "Camión de larga distancia ideal para traslado de granos entre acopios. Capacidad 30 tn.",
+    description: "CamiÃ³n de larga distancia ideal para traslado de granos entre acopios. Capacidad 30 tn.",
     distanceKm: 8, rating: 4.6, reviews: 17, operator: true, brand: "Scania", year: 2022,
     badge: "Nuevo",
     offerStatus: "paused",
@@ -101,7 +115,7 @@ const seedMachines = [
     category: "Embolsadora",
     price: 7500,
     priceUnit: "tonelada",
-    location: "Córdoba Capital",
+    location: "CÃ³rdoba Capital",
     availability: "Disponible esta cosecha",
     owner: "Agrobolsas Sur",
     description: "Embolsadora de alto rendimiento para almacenaje a campo. Capacidad 900 tn/h.",
@@ -330,7 +344,7 @@ const state = {
   availabilitySlots: readJSON(STORAGE_KEYS.availabilitySlots, []),
   notifications: readJSON(STORAGE_KEYS.notifications, []),
   auth:         initialAuth(),
-  theme:        normalizeTheme(localStorage.getItem(STORAGE_KEYS.theme)),
+  theme:        normalizeTheme(storageService.getString(STORAGE_KEYS.theme, "")),
   profile:      initialProfile(),
   publishStep: 1,
 };
@@ -373,13 +387,14 @@ function init() {
   bindLocationPicker();
   bindOffersTabs();
   bindOperationSheet();
+  bindListActionDelegation();
   syncMachineRatingsFromReviews();
   render();
   persistMachinePricingMigration();
   openLocationDemoFromQuery();
 }
 
-/* ─── NAVIGATION ─── */
+/* âââ NAVIGATION âââ */
 
 function initialAuth() {
   if (!devUserSwitcherEnabled) return readObject(STORAGE_KEYS.auth, null);
@@ -392,7 +407,7 @@ function initialProfile() {
 }
 
 function activeDevUserId() {
-  const stored = clean(localStorage.getItem(STORAGE_KEYS.devActiveUser));
+  const stored = clean(storageService.getString(STORAGE_KEYS.devActiveUser, ""));
   return devTestUsers.some((user) => user.id === stored) ? stored : devTestUsers[0].id;
 }
 
@@ -495,7 +510,7 @@ function switchDevUser(id) {
     return;
   }
   saveProfile();
-  localStorage.setItem(STORAGE_KEYS.devActiveUser, user.id);
+  storageService.setString(STORAGE_KEYS.devActiveUser, user.id);
   rememberDevUser(user.id);
   state.auth = devAuthFor(user.id);
   state.profile = devProfileFor(user.id);
@@ -512,12 +527,12 @@ function switchDevUser(id) {
 function rememberDevUser(id) {
   const recent = readJSON(STORAGE_KEYS.devRecentUsers, []);
   const next = [id, ...recent.filter((item) => item !== id && devTestUsers.some((user) => user.id === item))].slice(0, devTestUsers.length);
-  localStorage.setItem(STORAGE_KEYS.devRecentUsers, JSON.stringify(next));
+  storageService.setJSON(STORAGE_KEYS.devRecentUsers, next);
 }
 
 function ensureDevUserFixtures() {
   if (!devUserSwitcherEnabled) return;
-  localStorage.setItem(STORAGE_KEYS.devActiveUser, activeDevUserId());
+  storageService.setString(STORAGE_KEYS.devActiveUser, activeDevUserId());
   const profiles = readObject(STORAGE_KEYS.devProfiles, {});
   let profilesChanged = false;
   devTestUsers.forEach((user) => {
@@ -526,7 +541,7 @@ function ensureDevUserFixtures() {
       profilesChanged = true;
     }
   });
-  if (profilesChanged) localStorage.setItem(STORAGE_KEYS.devProfiles, JSON.stringify(profiles));
+  if (profilesChanged) storageService.setJSON(STORAGE_KEYS.devProfiles, profiles);
 
   const fixtures = devFixtures();
   let machinesChanged = false;
@@ -564,11 +579,11 @@ function ensureDevUserFixtures() {
       notificationsChanged = true;
     }
   });
-  if (machinesChanged) localStorage.setItem(STORAGE_KEYS.machines, JSON.stringify(state.machines));
-  if (slotsChanged) localStorage.setItem(STORAGE_KEYS.availabilitySlots, JSON.stringify(state.availabilitySlots));
-  if (reservationsChanged) localStorage.setItem(STORAGE_KEYS.reservations, JSON.stringify(state.reservations));
-  if (reviewsChanged) localStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(state.reviews));
-  if (notificationsChanged) localStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(state.notifications));
+  if (machinesChanged) storageService.setJSON(STORAGE_KEYS.machines, state.machines);
+  if (slotsChanged) storageService.setJSON(STORAGE_KEYS.availabilitySlots, state.availabilitySlots);
+  if (reservationsChanged) storageService.setJSON(STORAGE_KEYS.reservations, state.reservations);
+  if (reviewsChanged) storageService.setJSON(STORAGE_KEYS.reviews, state.reviews);
+  if (notificationsChanged) storageService.setJSON(STORAGE_KEYS.notifications, state.notifications);
 }
 
 function devFixtures() {
@@ -800,7 +815,7 @@ function showScreen(screen) {
   if (screen === "acceso")      renderAuth();
 }
 
-/* ─── FORMS ─── */
+/* âââ FORMS âââ */
 function bindForms() {
   $("#publish-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -846,7 +861,7 @@ function bindForms() {
       formEl.reset();
       resetPublishWizard();
       setButtonLoading(submitBtn, false);
-      showToast("¡Maquinaria publicada! Ya aparece en el catálogo.");
+      showToast("Â¡Maquinaria publicada! Ya aparece en el catÃ¡logo.");
       showScreen("mis-ofertas");
     }, 500);
   });
@@ -902,7 +917,7 @@ function bindForms() {
   });
 }
 
-/* ─── PUBLISH WIZARD ─── */
+/* âââ PUBLISH WIZARD âââ */
 function bindPublishWizard() {
   $$("#publish-category-grid .pub-cat-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1023,7 +1038,7 @@ function machinePricingNeedsMigration(machine) {
 
 function persistMachinePricingMigration() {
   if (!state.machines.some(machinePricingNeedsMigration)) return;
-  localStorage.setItem(STORAGE_KEYS.machines, JSON.stringify(state.machines.map(normalizeMachinePricing)));
+  storageService.setJSON(STORAGE_KEYS.machines, state.machines.map(normalizeMachinePricing));
 }
 
 function optionalNumber(value) {
@@ -1046,36 +1061,6 @@ function priceDisplay(machine) {
   if (unit === "fijo") return `${priceAmountLabel(machine)} ${meta.short}`;
   return `${priceAmountLabel(machine)}${meta.short}`;
 }
-function requestQuantityFieldsForPriceUnit(unit) {
-  return {
-    hectares: unit === "hectarea",
-    tons: unit === "tonelada" || unit === "tonelada_kilometro",
-    bags: unit === "bolsa",
-    trips: unit === "viaje",
-    km: unit === "kilometro" || unit === "tonelada_kilometro",
-    hours: unit === "hora",
-    days: unit === "dia",
-  };
-}
-
-function estimateServiceCost({ serviceType, priceUnit, unitPrice, quantity, modifiers = {} }) {
-  const price = Number(unitPrice);
-  const qty = Number(quantity);
-  const adjustment = Object.values(modifiers).reduce((sum, value) => sum + (Number(value) || 0), 0);
-  if (!Number.isFinite(price) || price <= 0) return { estimatedValue: null, quantity: null, priceUnit, unitPrice: price };
-  const effectiveQuantity = priceUnit === "fijo" ? 1 : qty;
-  if (!Number.isFinite(effectiveQuantity) || effectiveQuantity <= 0) {
-    return { estimatedValue: null, quantity: null, priceUnit, unitPrice: price };
-  }
-  return {
-    serviceType,
-    priceUnit,
-    unitPrice: price,
-    quantity: effectiveQuantity,
-    estimatedValue: Math.max(0, Math.round((price * effectiveQuantity) + adjustment)),
-  };
-}
-
 function requestEconomicContext(form, machine) {
   if (!machine) return null;
   const priceUnit = normalizePriceUnit(machine.priceUnit, machine.category);
@@ -1226,7 +1211,7 @@ function syncPublishPlateField(categoryOverride) {
 function validatePublishStep() {
   const form = $("#publish-form");
   if (state.publishStep === 1 && !$("#publish-category")?.value) {
-    showToast("Elegí una categoría para continuar.");
+    showToast("ElegÃ­ una categorÃ­a para continuar.");
     return false;
   }
   if (state.publishStep === 2) {
@@ -1269,7 +1254,7 @@ function updatePublishPreview() {
   $("#publish-preview-icon").innerHTML = `<i class="fa-solid ${icon}"></i>`;
   $("#publish-preview-category").textContent = category;
   $("#publish-preview-title").textContent = clean(form.elements.title.value) || "Tu equipo publicado";
-  $("#publish-preview-description").textContent = clean(form.elements.description.value) || "Completá los datos para ver cómo aparecerá en el catálogo.";
+  $("#publish-preview-description").textContent = clean(form.elements.description.value) || "CompletÃ¡ los datos para ver cÃ³mo aparecerÃ¡ en el catÃ¡logo.";
   $("#publish-preview-location").textContent = clean(form.elements.location.value) || "Zona de trabajo";
   const availabilityWindow = availabilityWindowFromPublishForm(form);
   const availabilityLabel = availabilityWindow.startDate && availabilityWindow.endDate
@@ -1295,7 +1280,7 @@ function resetPublishWizard() {
   renderPublishStep();
 }
 
-/* ─── PROFILE ─── */
+/* âââ PROFILE âââ */
 
 function bindProfile() {
   const form = $("#profile-form");
@@ -1390,7 +1375,7 @@ function applyTheme(theme) {
 function setTheme(theme) {
   state.theme = normalizeTheme(theme);
   applyTheme(state.theme);
-  localStorage.setItem(STORAGE_KEYS.theme, state.theme);
+  storageService.setString(STORAGE_KEYS.theme, state.theme);
   syncThemeControls();
   showToast(themeLabel(state.theme));
 }
@@ -1642,19 +1627,19 @@ function bindAuth() {
     const termsAccepted = Boolean(formControl(form, "termsAccepted")?.checked);
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      showAuthError("Ingresá un email válido.");
+      showAuthError("IngresÃ¡ un email vÃ¡lido.");
       return;
     }
     if (!password) {
-      showAuthError(mode === "register" ? "Creá una contraseña para registrarte." : "Ingresá tu contraseña.");
+      showAuthError(mode === "register" ? "CreÃ¡ una contraseÃ±a para registrarte." : "IngresÃ¡ tu contraseÃ±a.");
       return;
     }
     if (mode === "register" && !name) {
-      showAuthError("Ingresá tu nombre para registrarte.");
+      showAuthError("IngresÃ¡ tu nombre para registrarte.");
       return;
     }
     if (mode === "register" && password.length < 4) {
-      showAuthError("La contraseña debe tener al menos 4 caracteres.");
+      showAuthError("La contraseÃ±a debe tener al menos 4 caracteres.");
       return;
     }
 
@@ -1700,10 +1685,10 @@ function renderAuth() {
   $$(".auth-register-field").forEach((field) => { field.hidden = mode !== "register"; });
   if (passwordField) {
     const passwordLabel = passwordField.querySelector("span");
-    if (passwordLabel) passwordLabel.textContent = mode === "register" ? "Crear contraseña" : "Contraseña";
+    if (passwordLabel) passwordLabel.textContent = mode === "register" ? "Crear contraseÃ±a" : "ContraseÃ±a";
   }
   if (passwordInput) {
-    passwordInput.placeholder = mode === "register" ? "Creá una contraseña" : "Ingresá tu contraseña";
+    passwordInput.placeholder = mode === "register" ? "CreÃ¡ una contraseÃ±a" : "IngresÃ¡ tu contraseÃ±a";
   }
   $("#auth-submit .btn-label").innerHTML = mode === "register"
     ? '<i class="fa-solid fa-user-plus"></i> Crear cuenta'
@@ -1724,7 +1709,7 @@ function hideAuthError() {
   error.hidden = true;
 }
 
-/* ─── RENDER ─── */
+/* âââ RENDER âââ */
 function render() {
   renderCategoryFilters();
   syncCatalogFilterControls();
@@ -1762,7 +1747,7 @@ function renderProfile() {
   $("#user-chip").setAttribute("aria-label", state.auth ? "Entrar al perfil" : "Iniciar sesion");
 }
 
-/* ─── CATALOG ─── */
+/* âââ CATALOG âââ */
 function renderCategoryFilters() {
   const existing = new Set(state.machines.map((m) => m.category));
   const categories = categoryOrder.filter((c) => c === "Todas" || existing.has(c));
@@ -1802,9 +1787,24 @@ function renderCatalog() {
     : "Todavia no hay maquinaria publicada.";
   $("#results-meta").textContent = `${items.length} resultado${items.length === 1 ? "" : "s"}`;
   grid.innerHTML = items.map(machineCard).join("");
+}
 
-  $$(".request-btn").forEach((btn) => btn.addEventListener("click", () => openRequestModal(btn.dataset.machineId)));
-  $$(".report-btn").forEach((btn) => btn.addEventListener("click", () => openReportModal(btn.dataset.machineId)));
+function bindListActionDelegation() {
+  bindCatalogListActions();
+  bindOffersListActions();
+  bindReservationsListActions();
+}
+
+function bindCatalogListActions() {
+  $("#catalog-grid")?.addEventListener("click", (event) => {
+    const requestButton = event.target.closest(".request-btn");
+    if (requestButton) {
+      openRequestModal(requestButton.dataset.machineId);
+      return;
+    }
+    const reportButton = event.target.closest(".report-btn");
+    if (reportButton) openReportModal(reportButton.dataset.machineId);
+  });
 }
 
 function clearCatalogFilters() {
@@ -1830,10 +1830,6 @@ function applyCatalogFilters() {
   state.filters = { ...state.filterDraft.filters };
   closeCatalogFilters();
   renderCatalog();
-}
-
-function defaultCatalogFilters() {
-  return { availability: "Todas", service: "Todos", reputation: "Todas", todayOnly: false };
 }
 
 function syncCatalogFilterControls(filters = state.filters) {
@@ -1916,7 +1912,7 @@ function machineCard(machine) {
         <i class="fa-solid ${categoryIcons[machine.category] || "fa-tractor"}"></i>
         ${machine.badge ? `<span class="machine-badge">${escapeHTML(machine.badge)}</span>` : ""}
         ${availabilityBadge}
-        <button class="floating-action report-btn" type="button" aria-label="Denunciar publicación" title="Denunciar" data-machine-id="${escapeHTML(machine.id)}">
+        <button class="floating-action report-btn" type="button" aria-label="Denunciar publicaciÃ³n" title="Denunciar" data-machine-id="${escapeHTML(machine.id)}">
           <i class="fa-solid fa-flag"></i>
         </button>
       </div>
@@ -1926,7 +1922,7 @@ function machineCard(machine) {
           <span class="category-pill">${escapeHTML(machine.category)}</span>
         </div>
         <div class="machine-meta">
-          <span><i class="fa-solid fa-location-dot"></i>${escapeHTML(machine.location)}${hasDistance ? ` · ${machine.distanceKm} km` : ""}</span>
+          <span><i class="fa-solid fa-location-dot"></i>${escapeHTML(machine.location)}${hasDistance ? ` Â· ${machine.distanceKm} km` : ""}</span>
           <span><i class="fa-regular fa-calendar-check"></i>${escapeHTML(availabilityLabel)}</span>
           <span><i class="fa-solid fa-layer-group"></i>${escapeHTML(availabilityStatus)}</span>
           <span><i class="fa-solid fa-user-tie"></i>${profileTrigger({ type: "contractor", machineId: machine.id, label: machine.owner })}</span>
@@ -1947,7 +1943,7 @@ function machineCard(machine) {
   `;
 }
 
-/* ─── MIS OFERTAS ─── */
+/* âââ MIS OFERTAS âââ */
 function bindOffersTabs() {
   $$("#offers-tabs .offers-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1955,6 +1951,90 @@ function bindOffersTabs() {
       $$("#offers-tabs .offers-tab").forEach((b) => b.classList.toggle("active", b === btn));
       renderMisOfertas();
     });
+  });
+}
+
+function bindOffersListActions() {
+  $("#offers-list")?.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button || button.disabled) return;
+
+    if (button.matches(".accept-solicitud-btn")) {
+      acceptNegotiatedSchedule(button.dataset.id);
+      return;
+    }
+    if (button.matches(".open-schedule-counter-btn")) {
+      openScheduleCounterModal(button.dataset.id);
+      return;
+    }
+    if (button.matches(".accept-reschedule-btn")) {
+      acceptRescheduleRequest(button.dataset.rescheduleId);
+      return;
+    }
+    if (button.matches(".reject-reschedule-btn")) {
+      rejectRescheduleRequest(button.dataset.rescheduleId);
+      return;
+    }
+    if (button.matches(".operation-next-btn")) {
+      advanceOperationState(button.dataset.reservationId);
+      return;
+    }
+    if (button.matches(".open-operation-sheet-btn")) {
+      openOperationSheet(button.dataset.reservationId);
+      return;
+    }
+    if (button.matches(".reject-solicitud-btn")) {
+      confirmAction(
+        "Rechazar solicitud",
+        `Ã‚Â¿Rechazar la solicitud de ${button.dataset.title}?`,
+        "No se puede deshacer. El productor verÃƒÂ¡ el estado actualizado.",
+        () => setReservationStatus(button.dataset.id, "rejected"),
+        "Rechazar"
+      );
+      return;
+    }
+    if (button.matches(".offer-pause-btn")) {
+      if (setOfferStatus(button.dataset.id, "paused")) {
+        showToast("Oferta pausada. No aparece en el catalogo hasta que la actives.");
+      }
+      return;
+    }
+    if (button.matches(".offer-activate-btn")) {
+      if (setOfferStatus(button.dataset.id, "active")) {
+        showToast("Oferta activada. Ya aparece en el catalogo.");
+      }
+      return;
+    }
+    if (button.matches(".offer-baja-btn")) {
+      confirmAction(
+        "Dar de baja la oferta",
+        `Ã‚Â¿QuerÃƒÂ©s dar de baja "${findMachine(button.dataset.id)?.title}"?`,
+        "La oferta dejarÃƒÂ¡ de aparecer en el catÃƒÂ¡logo. PodÃƒÂ©s reactivarla desde 'Dadas de baja'.",
+        () => { if (setOfferStatus(button.dataset.id, "inactive")) showToast("Oferta dada de baja."); },
+        "Dar de baja"
+      );
+      return;
+    }
+    if (button.matches(".offer-delete-btn")) {
+      if (hasPendingRequestsForMachine(button.dataset.id)) {
+        showToast("Primero acepta o rechaza la solicitud pendiente para eliminar esta oferta.");
+        return;
+      }
+      confirmAction(
+        "Eliminar definitivamente",
+        `Ã‚Â¿Eliminar "${findMachine(button.dataset.id)?.title}" de forma permanente?`,
+        "Esta acciÃƒÂ³n no se puede deshacer.",
+        () => {
+          state.machines = state.machines.filter((m) => m.id !== button.dataset.id);
+          state.availabilitySlots = state.availabilitySlots.filter((slot) => slot.machineId !== button.dataset.id);
+          saveMachines();
+          saveAvailabilitySlots();
+          renderMisOfertas();
+          showToast("Oferta eliminada.");
+        },
+        "Eliminar"
+      );
+    }
   });
 }
 
@@ -1992,10 +2072,10 @@ function renderMisOfertas() {
 
   if (tab === "activas") {
     items = activas;
-    emptyText = "No tenés ofertas activas todavía.";
+    emptyText = "No tenÃ©s ofertas activas todavÃ­a.";
   } else if (tab === "pausadas") {
     items = pausadas;
-    emptyText = "No tenés ofertas pausadas.";
+    emptyText = "No tenÃ©s ofertas pausadas.";
   } else if (tab === "bajas") {
     items = inactivas;
     emptyText = "No diste de baja ninguna oferta.";
@@ -2004,82 +2084,18 @@ function renderMisOfertas() {
     empty.hidden = solicitudes.length > 0;
     $("#offers-empty-text").textContent = "No hay solicitudes pendientes.";
 
-    if (solicitudes.length === 0) {
-      list.innerHTML = "";
-    } else {
-      $$(".accept-solicitud-btn").forEach((btn) =>
-        btn.addEventListener("click", () => acceptNegotiatedSchedule(btn.dataset.id)));
-      $$(".open-schedule-counter-btn").forEach((btn) =>
-        btn.addEventListener("click", () => openScheduleCounterModal(btn.dataset.id)));
-      $$(".accept-reschedule-btn").forEach((btn) =>
-        btn.addEventListener("click", () => acceptRescheduleRequest(btn.dataset.rescheduleId)));
-      $$(".reject-reschedule-btn").forEach((btn) =>
-        btn.addEventListener("click", () => rejectRescheduleRequest(btn.dataset.rescheduleId)));
-      $$(".operation-next-btn").forEach((btn) =>
-        btn.addEventListener("click", () => advanceOperationState(btn.dataset.reservationId)));
-      $$(".open-operation-sheet-btn").forEach((btn) =>
-        btn.addEventListener("click", () => openOperationSheet(btn.dataset.reservationId)));
-      $$(".reject-solicitud-btn").forEach((btn) =>
-        btn.addEventListener("click", () => confirmAction(
-          "Rechazar solicitud",
-          `¿Rechazar la solicitud de ${btn.dataset.title}?`,
-          "No se puede deshacer. El productor verá el estado actualizado.",
-          () => setReservationStatus(btn.dataset.id, "rejected"),
-          "Rechazar"
-        )));
-    }
+    if (solicitudes.length === 0) list.innerHTML = "";
     return;
   }
 
   empty.hidden = items.length > 0;
   $("#offers-empty-text").textContent = emptyText;
   list.innerHTML = items.map((m) => offerCard(m, tab)).join("");
-
-  // Bind offer action buttons
-  $$(".offer-pause-btn").forEach((btn) => btn.addEventListener("click", () => {
-    if (setOfferStatus(btn.dataset.id, "paused")) {
-      showToast("Oferta pausada. No aparece en el catalogo hasta que la actives.");
-    }
-  }));
-  $$(".offer-activate-btn").forEach((btn) => btn.addEventListener("click", () => {
-    if (setOfferStatus(btn.dataset.id, "active")) {
-      showToast("Oferta activada. Ya aparece en el catalogo.");
-    }
-  }));
-  $$(".offer-baja-btn").forEach((btn) => btn.addEventListener("click", () =>
-    confirmAction(
-      "Dar de baja la oferta",
-      `¿Querés dar de baja "${findMachine(btn.dataset.id)?.title}"?`,
-      "La oferta dejará de aparecer en el catálogo. Podés reactivarla desde 'Dadas de baja'.",
-      () => { if (setOfferStatus(btn.dataset.id, "inactive")) showToast("Oferta dada de baja."); },
-      "Dar de baja"
-    )
-  ));
-  $$(".offer-delete-btn").forEach((btn) => btn.addEventListener("click", () => {
-    if (hasPendingRequestsForMachine(btn.dataset.id)) {
-      showToast("Primero acepta o rechaza la solicitud pendiente para eliminar esta oferta.");
-      return;
-    }
-    confirmAction(
-      "Eliminar definitivamente",
-      `¿Eliminar "${findMachine(btn.dataset.id)?.title}" de forma permanente?`,
-      "Esta acción no se puede deshacer.",
-      () => {
-        state.machines = state.machines.filter((m) => m.id !== btn.dataset.id);
-        state.availabilitySlots = state.availabilitySlots.filter((slot) => slot.machineId !== btn.dataset.id);
-        saveMachines();
-        saveAvailabilitySlots();
-        renderMisOfertas();
-        showToast("Oferta eliminada.");
-      },
-      "Eliminar"
-    )
-  }));
 }
 
 function offerCard(machine, tab) {
   const solicitudesPendientes = pendingRequestsForMachine(machine.id).length;
-  const offerChangeLocked = solicitudesPendientes > 0;
+  const offerChangeLocked = offerHasPendingRequests(solicitudesPendientes);
   const offerLockAttr = offerChangeLocked ? 'disabled title="Acepta o rechaza la solicitud pendiente antes de cambiar esta oferta"' : "";
   const reservasTotales       = state.reservations.filter((r) => r.machineId === machine.id).length;
   const icon = categoryIcons[machine.category] || "fa-tractor";
@@ -2177,7 +2193,7 @@ function contractorOperationPanel(reservation) {
 }
 
 function operationVisibleForReservation(reservation) {
-  return ["accepted", "working", "done"].includes(reservation?.status) || Boolean(reservation?.operationStatus || reservation?.operationEvents?.length);
+  return operationVisibleForStatus(reservation?.status) || Boolean(reservation?.operationStatus || reservation?.operationEvents?.length);
 }
 
 function currentOperationState(reservation) {
@@ -2228,7 +2244,7 @@ function operationIncidentsMarkup(reservation) {
   return `
     <div class="operation-incidents">
       <span>Incidencias reportadas</span>
-      <ul>${incidents.slice(0, 3).map((item) => `<li><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHTML(item.reason)} � ${formatTime(item.createdAt)}</li>`).join("")}</ul>
+      <ul>${incidents.slice(0, 3).map((item) => `<li><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHTML(item.reason)} · ${formatTime(item.createdAt)}</li>`).join("")}</ul>
     </div>
   `;
 }
@@ -2303,7 +2319,7 @@ function promptLocationSharing(reservationId) {
   saveReservations();
   confirmAction(
     "Ubicacion en viaje",
-    "�Deseas compartir tu ubicacion durante este viaje?",
+    "¿Deseas compartir tu ubicacion durante este viaje?",
     "Se comparte solo durante esta contratacion activa y se detiene al finalizar el trabajo.",
     () => enableOperationLocationSharing(reservationId),
     "Compartir ubicacion"
@@ -2643,34 +2659,14 @@ function knownCoordinatesForLocation(value) {
   const places = [
     { match: ["venado tuerto"], address: "Venado Tuerto, Santa Fe", latitude: -33.7456, longitude: -61.9688 },
     { match: ["pergamino"], address: "Pergamino, Buenos Aires", latitude: -33.8895, longitude: -60.5736 },
-    { match: ["junin", "jun�n", "jun n"], address: "Junin, Buenos Aires", latitude: -34.5850, longitude: -60.9589 },
+    { match: ["junin", "junã­n", "jun n"], address: "Junin, Buenos Aires", latitude: -34.5850, longitude: -60.9589 },
     { match: ["rojas"], address: "Rojas, Buenos Aires", latitude: -34.1977, longitude: -60.7350 },
     { match: ["rosario"], address: "Rosario, Santa Fe", latitude: -32.9442, longitude: -60.6505 },
-    { match: ["cordoba", "c�rdoba", "c�rdoba"], address: "Cordoba Capital", latitude: -31.4201, longitude: -64.1888 },
+    { match: ["cordoba", "córdoba", "cã³rdoba"], address: "Cordoba Capital", latitude: -31.4201, longitude: -64.1888 },
     { match: ["buenos aires"], address: "Buenos Aires", latitude: -34.6037, longitude: -58.3816 },
   ];
   const found = places.find((place) => place.match.some((item) => key.includes(item)));
   return found ? { address: found.address, latitude: found.latitude, longitude: found.longitude } : null;
-}
-
-function haversineKm(origin, destination) {
-  const toRad = (value) => Number(value) * Math.PI / 180;
-  const radiusKm = 6371;
-  const dLat = toRad(destination.latitude - origin.latitude);
-  const dLon = toRad(destination.longitude - origin.longitude);
-  const lat1 = toRad(origin.latitude);
-  const lat2 = toRad(destination.latitude);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-  return radiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function formatKm(value) {
-  return Number(value).toLocaleString("es-AR", { maximumFractionDigits: value < 20 ? 1 : 0 });
-}
-
-function estimatedTravelMinutes(distanceKm) {
-  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return null;
-  return Math.max(10, Math.round((distanceKm / 55) * 60));
 }
 
 function googleMapsRouteUrl(destination, origin = null) {
@@ -2715,7 +2711,7 @@ function pendingRequestsForMachine(machineId) {
 }
 
 function isContractorNegotiationStatus(reservation) {
-  return ["pending", "schedule_counter", "original_kept", "accepted", "working"].includes(reservation?.status) || Boolean(pendingRescheduleFor(reservation?.id));
+  return isContractorNegotiationStatusRule(reservation, pendingRescheduleFor(reservation?.id));
 }
 
 function hasPendingRequestsForMachine(machineId) {
@@ -2753,7 +2749,78 @@ function markAvailabilitySlotPartiallyBooked(machineId) {
   slot.status = "partially_booked";
   saveAvailabilitySlots();
 }
-/* ─── RESERVAS ─── */
+/* âââ RESERVAS âââ */
+
+function bindReservationsListActions() {
+  $("#reservations-list")?.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button || button.disabled) return;
+
+    if (button.matches(".accept-reservation")) {
+      setReservationStatus(button.dataset.reservationId, "accepted");
+      return;
+    }
+    if (button.matches(".reject-reservation")) {
+      confirmAction(
+        "Rechazar solicitud",
+        "Rechazar esta solicitud?",
+        button.dataset.title + " para " + formatDate(button.dataset.date) + ". No se puede deshacer.",
+        () => setReservationStatus(button.dataset.reservationId, "rejected"),
+        "Rechazar"
+      );
+      return;
+    }
+    if (button.matches(".start-work-reservation")) {
+      setReservationStatus(button.dataset.reservationId, "working");
+      return;
+    }
+    if (button.matches(".finish-work-reservation")) {
+      setReservationStatus(button.dataset.reservationId, "done");
+      return;
+    }
+    if (button.matches(".delete-finished-reservation")) {
+      confirmAction(
+        "Eliminar reserva",
+        "Eliminar reserva del historial",
+        button.dataset.title + ". Esta accion quita la reserva del historial local.",
+        () => deleteReservation(button.dataset.reservationId),
+        "Eliminar"
+      );
+      return;
+    }
+    if (button.matches(".open-reschedule-btn")) {
+      openRescheduleModal(button.dataset.reservationId);
+      return;
+    }
+    if (button.matches(".accept-reschedule-btn")) {
+      acceptRescheduleRequest(button.dataset.rescheduleId);
+      return;
+    }
+    if (button.matches(".reject-reschedule-btn")) {
+      rejectRescheduleRequest(button.dataset.rescheduleId);
+      return;
+    }
+    if (button.matches(".open-delay-btn")) {
+      openDelayModal(button.dataset.reservationId);
+      return;
+    }
+    if (button.matches(".accept-schedule-counter-btn")) {
+      acceptScheduleCounter(button.dataset.reservationId);
+      return;
+    }
+    if (button.matches(".keep-original-schedule-btn")) {
+      keepOriginalSchedule(button.dataset.reservationId);
+      return;
+    }
+    if (button.matches(".cancel-schedule-request-btn")) {
+      cancelScheduleRequest(button.dataset.reservationId);
+      return;
+    }
+    if (button.matches(".open-review-btn")) {
+      openReviewModal(button.dataset.reservationId, button.dataset.reviewerRole);
+    }
+  });
+}
 
 function renderReservations() {
   const list  = $("#reservations-list");
@@ -2768,29 +2835,6 @@ function renderReservations() {
 
   list.innerHTML = visibleReservations.map((r) => reservationCard(r)).join("");
 
-  $$(".accept-reservation").forEach((btn) => btn.addEventListener("click", () => setReservationStatus(btn.dataset.reservationId, "accepted")));
-  $$(".reject-reservation").forEach((btn) => btn.addEventListener("click", () =>
-    confirmAction("Rechazar solicitud", "Rechazar esta solicitud?",
-      btn.dataset.title + " para " + formatDate(btn.dataset.date) + ". No se puede deshacer.",
-      () => setReservationStatus(btn.dataset.reservationId, "rejected"),
-      "Rechazar"
-    )));
-  $$(".start-work-reservation").forEach((btn)  => btn.addEventListener("click", () => setReservationStatus(btn.dataset.reservationId, "working")));
-  $$(".finish-work-reservation").forEach((btn) => btn.addEventListener("click", () => setReservationStatus(btn.dataset.reservationId, "done")));
-  $$(".delete-finished-reservation").forEach((btn) => btn.addEventListener("click", () =>
-    confirmAction("Eliminar reserva", "Eliminar reserva del historial",
-      btn.dataset.title + ". Esta accion quita la reserva del historial local.",
-      () => deleteReservation(btn.dataset.reservationId),
-      "Eliminar"
-    )));
-  $$(".open-reschedule-btn").forEach((btn) => btn.addEventListener("click", () => openRescheduleModal(btn.dataset.reservationId)));
-  $$(".accept-reschedule-btn").forEach((btn) => btn.addEventListener("click", () => acceptRescheduleRequest(btn.dataset.rescheduleId)));
-  $$(".reject-reschedule-btn").forEach((btn) => btn.addEventListener("click", () => rejectRescheduleRequest(btn.dataset.rescheduleId)));
-  $$(".open-delay-btn").forEach((btn) => btn.addEventListener("click", () => openDelayModal(btn.dataset.reservationId)));
-  $$(".accept-schedule-counter-btn").forEach((btn) => btn.addEventListener("click", () => acceptScheduleCounter(btn.dataset.reservationId)));
-  $$(".keep-original-schedule-btn").forEach((btn) => btn.addEventListener("click", () => keepOriginalSchedule(btn.dataset.reservationId)));
-  $$(".cancel-schedule-request-btn").forEach((btn) => btn.addEventListener("click", () => cancelScheduleRequest(btn.dataset.reservationId)));
-  $$(".open-review-btn").forEach((btn) => btn.addEventListener("click", () => openReviewModal(btn.dataset.reservationId, btn.dataset.reviewerRole)));
 }
 
 function reservationCard(reservation) {
@@ -2989,8 +3033,8 @@ function delayHistoryFor(jobId) {
 function delayHistoryItem(record) {
   return `
     <div class="reschedule-item">
-      <strong>${delayTypeLabel(record.delayType)} � ${money(record.minutesDelayed)} min</strong>
-      <small>Reportado por ${escapeHTML(record.reportedByName || record.reportedBy)} � ${formatDate(record.createdAt)}</small>
+      <strong>${delayTypeLabel(record.delayType)} · ${money(record.minutesDelayed)} min</strong>
+      <small>Reportado por ${escapeHTML(record.reportedByName || record.reportedBy)} · ${formatDate(record.createdAt)}</small>
       ${record.reason ? `<small>Motivo: ${escapeHTML(record.reason)}</small>` : ""}
     </div>
   `;
@@ -3045,7 +3089,7 @@ function rescheduleHistoryItem(request) {
   return `
     <div class="reschedule-item">
       <strong>${formatDateTimeRangeValues(request.proposedStart, request.proposedEnd, request.proposedStartTime, request.proposedEndTime)}</strong>
-      <small>${rescheduleStatusLabel(request.status)} � pedido por ${escapeHTML(request.requestedByName || request.requestedBy)}</small>
+      <small>${rescheduleStatusLabel(request.status)} · pedido por ${escapeHTML(request.requestedByName || request.requestedBy)}</small>
       ${request.reason ? `<small>Motivo: ${escapeHTML(request.reason)}</small>` : ""}
     </div>
   `;
@@ -3934,50 +3978,6 @@ function responseMinutesForReservation(reservation) {
 }
 
 
-function weightedReviewCategoryAverage(reviews, reviewedRole) {
-  const weights = reviewCategoryWeightsByReviewedRole[reviewedRole] || {};
-  const values = [];
-  reviews.forEach((review) => {
-    let weightedSum = 0;
-    let totalWeight = 0;
-    Object.entries(weights).forEach(([key, weight]) => {
-      const value = Number(review.categories?.[key]);
-      if (!validRating(value)) return;
-      weightedSum += value * weight;
-      totalWeight += weight;
-    });
-    if (totalWeight > 0) values.push(weightedSum / totalWeight);
-  });
-  return average(values);
-}
-
-function responseReputationScore(minutes) {
-  if (!Number.isFinite(minutes)) return null;
-  if (minutes <= 120) return 100;
-  if (minutes <= 720) return 85;
-  if (minutes <= 1440) return 70;
-  if (minutes <= 2880) return 50;
-  return 30;
-}
-
-function calculateReputationScore(reviews, metrics, reviewedRole, averageRating, wouldAgainPercent) {
-  const categoryAverage = weightedReviewCategoryAverage(reviews, reviewedRole);
-  const components = [
-    { value: typeof averageRating === "number" ? (averageRating / 5) * 100 : null, weight: 0.24 },
-    { value: typeof categoryAverage === "number" ? (categoryAverage / 5) * 100 : null, weight: 0.18 },
-    { value: typeof wouldAgainPercent === "number" ? wouldAgainPercent : null, weight: 0.16 },
-    { value: Math.min(100, (metrics.completedCount || 0) * 12), weight: 0.12 },
-    { value: Math.min(100, reviews.length * 14), weight: 0.08 },
-    { value: typeof metrics.acceptanceRate === "number" ? metrics.acceptanceRate : null, weight: 0.09 },
-    { value: typeof metrics.cancellationRate === "number" ? Math.max(0, 100 - metrics.cancellationRate) : null, weight: 0.08 },
-    { value: responseReputationScore(metrics.averageResponseMinutes), weight: 0.05 },
-  ].filter((item) => Number.isFinite(item.value));
-  if (!components.length) return null;
-  const totalWeight = components.reduce((sum, item) => sum + item.weight, 0);
-  return Math.round(components.reduce((sum, item) => sum + item.value * item.weight, 0) / totalWeight);
-}
-
-
 function profileReputationSummary(kind, name) {
   const reviews = reviewsForProfile(kind, name);
   const metrics = automaticReputationMetrics(kind, name);
@@ -3992,7 +3992,7 @@ function profileReputationSummary(kind, name) {
     metrics,
     completedCount: metrics.completedCount,
     averageRating: avg,
-    reputationScore: calculateReputationScore(reviews, metrics, kind, avg, wouldAgain),
+    reputationScore: calculateReputationScore(reviews, metrics, kind, avg, wouldAgain, reviewCategoryWeightsByReviewedRole),
     evaluationCount: reviews.length,
     wouldAgainPercent: wouldAgain,
     latestActivity: latest,
@@ -4138,7 +4138,7 @@ function setReservationStatus(id, status) {
   showToast(msgs[status] || "Estado actualizado.");
 }
 
-/* ─── REQUEST MODAL ─── */
+/* âââ REQUEST MODAL âââ */
 function openRequestModal(machineId) {
   const machine = findMachine(machineId);
   if (!machine) return;
@@ -4900,7 +4900,7 @@ function requestDurationEstimateLabel(form) {
   if (!hectaresField || hectaresField.hidden || !Number.isFinite(hectares) || hectares <= 0) return "";
   const hours = Math.max(1, Math.ceil(hectares / 18));
   const label = hours <= 8 ? "1 jornada de trabajo" : `${Math.ceil(hours / 8)} jornadas de trabajo`;
-  return `${label} � aprox. ${hours} h`;
+  return `${label} · aprox. ${hours} h`;
 }
 function updateRequestEconomicSummary(form, machine) {
   const summary = $("#request-economic-summary");
@@ -5022,7 +5022,7 @@ function hideRequestError() {
   error.hidden = true;
 }
 
-/* ─── REPORT MODAL ─── */
+/* âââ REPORT MODAL âââ */
 function bindReportModal() {
   const form = $("#report-form");
   if (!form) return;
@@ -5043,7 +5043,7 @@ function openReportModal(machineId) {
   if (!machine || !form) return;
   form.reset();
   formControl(form, "machineId").value = machine.id;
-  $("#report-target").textContent = `${machine.title} � ${machine.owner}`;
+  $("#report-target").textContent = `${machine.title} · ${machine.owner}`;
   toggleReportOther(form);
   hideReportError();
   $("#report-modal").hidden = false;
@@ -5092,7 +5092,7 @@ function hideReportError() {
   error.textContent = "";
   error.hidden = true;
 }
-/* ─── CONFIRM MODAL ─── */
+/* âââ CONFIRM MODAL âââ */
 function confirmAction(eyebrow, title, body, onConfirm, confirmLabel = "Confirmar") {
   pendingAction = onConfirm;
   $("#confirm-eyebrow").textContent = eyebrow;
@@ -5139,7 +5139,7 @@ function bindConfirmModal() {
   });
 }
 
-/* ─── BADGES ─── */
+/* âââ BADGES âââ */
 /* NOTIFICACIONES */
 function bindNotificationCenter() {
   $("#notification-toggle")?.addEventListener("click", toggleNotificationCenter);
@@ -5147,6 +5147,10 @@ function bindNotificationCenter() {
   $("#notification-backdrop")?.addEventListener("click", closeNotificationCenter);
   $("#notification-mark-read")?.addEventListener("click", markAllNotificationsRead);
   $("#notification-permission")?.addEventListener("click", requestBrowserNotificationPermission);
+  $("#notification-list")?.addEventListener("click", (event) => {
+    const item = event.target.closest(".notification-item");
+    if (item) openNotificationDetail(item.dataset.notificationId);
+  });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && isNotificationCenterOpen()) closeNotificationCenter();
   });
@@ -5275,7 +5279,6 @@ function renderNotifications() {
   const notifications = notificationsForCurrentUser();
   empty.hidden = notifications.length > 0;
   list.innerHTML = notifications.map(notificationItemMarkup).join("");
-  $$(".notification-item").forEach((item) => item.addEventListener("click", () => openNotificationDetail(item.dataset.notificationId)));
   syncNotificationPermissionButton();
 }
 
@@ -5410,11 +5413,6 @@ function unreadNotificationsCount() {
   return notificationsForCurrentUser().filter((item) => !item.read).length;
 }
 
-function normalizeNotificationPriority(priority) {
-  const value = clean(priority).toUpperCase();
-  return ["HIGH", "MEDIUM", "LOW"].includes(value) ? value : "LOW";
-}
-
 function notificationIcon(type) {
   const icons = {
     job_request: "fa-clipboard-list",
@@ -5425,11 +5423,6 @@ function notificationIcon(type) {
     system: "fa-circle-info",
   };
   return icons[type] || icons.system;
-}
-
-function notificationId() {
-  if (crypto?.randomUUID) return crypto.randomUUID();
-  return `nt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function playNotificationSound(type) {
@@ -5484,44 +5477,44 @@ function updateBadges() {
 }
 
 function saveMachines() {
-  localStorage.setItem(STORAGE_KEYS.machines, JSON.stringify(state.machines));
+  storageService.setJSON(STORAGE_KEYS.machines, state.machines);
   renderCategoryFilters();
 }
 function saveReservations() {
-  localStorage.setItem(STORAGE_KEYS.reservations, JSON.stringify(state.reservations));
+  storageService.setJSON(STORAGE_KEYS.reservations, state.reservations);
 }
 function saveRescheduleRequests() {
-  localStorage.setItem(STORAGE_KEYS.reschedules, JSON.stringify(state.rescheduleRequests));
+  storageService.setJSON(STORAGE_KEYS.reschedules, state.rescheduleRequests);
 }
 function saveDelayRecords() {
-  localStorage.setItem(STORAGE_KEYS.delays, JSON.stringify(state.delayRecords));
+  storageService.setJSON(STORAGE_KEYS.delays, state.delayRecords);
 }
 function saveReviews() {
-  localStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(state.reviews));
+  storageService.setJSON(STORAGE_KEYS.reviews, state.reviews);
 }
 function saveAvailabilitySlots() {
-  localStorage.setItem(STORAGE_KEYS.availabilitySlots, JSON.stringify(state.availabilitySlots));
+  storageService.setJSON(STORAGE_KEYS.availabilitySlots, state.availabilitySlots);
 }
 function saveNotifications() {
-  localStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(state.notifications));
+  storageService.setJSON(STORAGE_KEYS.notifications, state.notifications);
 }
 
 function saveAuth() {
   if (state.auth) {
-    localStorage.setItem(STORAGE_KEYS.auth, JSON.stringify(state.auth));
-    if (devUserSwitcherEnabled && state.auth.devUserId) localStorage.setItem(STORAGE_KEYS.devActiveUser, state.auth.devUserId);
+    storageService.setJSON(STORAGE_KEYS.auth, state.auth);
+    if (devUserSwitcherEnabled && state.auth.devUserId) storageService.setString(STORAGE_KEYS.devActiveUser, state.auth.devUserId);
   } else {
-    localStorage.removeItem(STORAGE_KEYS.auth);
+    storageService.remove(STORAGE_KEYS.auth);
   }
 }
 function saveProfile() {
   if (devUserSwitcherEnabled && state.auth?.devUserId) {
     const profiles = readObject(STORAGE_KEYS.devProfiles, {});
     profiles[state.auth.devUserId] = state.profile;
-    localStorage.setItem(STORAGE_KEYS.devProfiles, JSON.stringify(profiles));
+    storageService.setJSON(STORAGE_KEYS.devProfiles, profiles);
     return;
   }
-  localStorage.setItem("nexudrive_mvp_profile", JSON.stringify(state.profile));
+  storageService.setJSON("nexudrive_mvp_profile", state.profile);
 }
 
 function findMachine(id) {
@@ -5591,21 +5584,13 @@ function offsetISODate(days) {
   return date.toISOString().slice(0, 10);
 }
 function readJSON(key, fallback) {
-  try {
-    const v = JSON.parse(localStorage.getItem(key));
-    return Array.isArray(v) ? v : fallback;
-  } catch { return fallback; }
+  return storageService.getArray(key, fallback);
 }
 function readObject(key, fallback) {
-  try {
-    const v = JSON.parse(localStorage.getItem(key));
-    return v && typeof v === "object" && !Array.isArray(v) ? { ...fallback, ...v } : fallback;
-  } catch { return fallback; }
+  return storageService.getObject(key, fallback);
 }
 
-/* ─── UTILS ─── */
-function clean(value) { return String(value || "").trim(); }
-
+/* âââ UTILS âââ */
 function textKey(value) { return clean(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
 
 function hashCode(value) {
@@ -5616,16 +5601,10 @@ function formControl(form, name) {
   return form.elements.namedItem(name);
 }
 
-function escapeHTML(value) {
-  return clean(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
-}
-
-function money(value) { return Number(value || 0).toLocaleString("es-AR"); }
-
 function formatDateRange(reservation) {
   const start = formatDate(reservation.date);
   const time = reservationTimeLabel(reservation);
-  const startLabel = time ? `${start} � ${time}` : start;
+  const startLabel = time ? `${start} · ${time}` : start;
   if (reservation.dateFlexible) return `${startLabel} - flexible`;
   if (reservation.dateEnd) return `${startLabel} - ${formatDate(reservation.dateEnd)}`;
   return startLabel;
