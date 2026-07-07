@@ -356,7 +356,7 @@ let notificationGroupTimer = null;
 let notificationToastQueue = [];
 let lastUserActivityAt = Date.now();
 let lastOperationUndo = null;
-const locationPickerState = { map: null, marker: null, form: null, selected: null, operationCircle: null, operationCenterMarker: null, operationCenter: null };
+const locationPickerState = { map: null, marker: null, form: null, target: "work", selected: null, operationCircle: null, operationCenterMarker: null, operationCenter: null };
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -901,9 +901,15 @@ function bindForms() {
   formControl(requestForm, "date").addEventListener("change", () => syncRequestDateRange(requestForm));
   formControl(requestForm, "hectares").addEventListener("input", () => updateRequestEstimate(requestForm));
   ["estimatedTons", "estimatedBags", "estimatedTrips", "estimatedKm", "estimatedServiceHours", "estimatedDays", "origin", "destination"].forEach((name) => {
-    formControl(requestForm, name)?.addEventListener("input", () => updateRequestEstimate(requestForm));
+    formControl(requestForm, name)?.addEventListener("input", () => {
+      if (name === "origin" || name === "destination") clearTransportCoordinates(requestForm, name);
+      updateRequestEstimate(requestForm);
+    });
   });
   $("#request-location-picker").addEventListener("click", () => openLocationPicker(requestForm));
+  requestForm.querySelectorAll("[data-location-target]").forEach((button) => {
+    button.addEventListener("click", () => openLocationPicker(requestForm, button.dataset.locationTarget));
+  });
   requestForm.addEventListener("input", () => {
     hideRequestError();
     updateRequestEstimate(requestForm);
@@ -2440,8 +2446,14 @@ function contractorScheduleActions(reservation) {
     return `<p class="reservation-rejected neutral"><i class="fa-regular fa-clock"></i> Esperando respuesta del productor.</p>`;
   }
   if (!["pending", "original_kept"].includes(reservation.status)) return "";
+  const requestedSchedule = originalScheduleLabel(reservation);
   return `
     <div class="offer-solicitud-actions">
+      <div class="schedule-action-context">
+        <i class="fa-regular fa-clock"></i>
+        <span>Horario a confirmar</span>
+        <strong>${escapeHTML(requestedSchedule)}</strong>
+      </div>
       <button class="btn btn-sm danger reject-solicitud-btn" type="button"
         data-id="${reservation.id}" data-title="${escapeHTML(reservation.machineTitle)}">
         <i class="fa-solid fa-xmark"></i> Rechazar
@@ -2602,7 +2614,9 @@ function reservationRequesterLabel(reservation, escaped = true) {
 }
 
 function reservationWorkLocation(reservation) {
-  const direct = reservation.location;
+  const direct = reservation.requestMode === "truck" || reservation.category === "Camion"
+    ? (reservation.destinationLocation || reservation.originLocation || reservation.location)
+    : reservation.location;
   if (direct && isValidCoordinate(direct.latitude, direct.longitude)) {
     return {
       address: clean(direct.address) || reservation.field || "Ubicacion del trabajo",
@@ -2838,20 +2852,22 @@ function renderReservations() {
 }
 
 function reservationCard(reservation) {
-  const canResolve    = reservation.status === "pending";
-  const canStartWork  = reservation.status === "accepted";
-  const canFinishWork = reservation.status === "working";
+  const sentByActiveUser = activeUserRequestedReservation(reservation);
+  const canResolve    = reservation.status === "pending" && !sentByActiveUser;
+  const canStartWork  = reservation.status === "accepted" && !sentByActiveUser;
+  const canFinishWork = reservation.status === "working" && !sentByActiveUser;
   const canDeleteFinished = ["done", "rejected", "cancelled"].includes(reservation.status);
   const canReviewContractor = reservation.status === "done" && !reviewForReservation(reservation.id, "producer");
   const canReviewProducer = reservation.status === "done" && !reviewForReservation(reservation.id, "contractor");
-  const canRespondScheduleCounter = reservation.status === "schedule_counter";
+  const canRespondScheduleCounter = reservation.status === "schedule_counter" && sentByActiveUser;
   const canRequestReschedule = ["accepted", "working"].includes(reservation.status) && !pendingRescheduleFor(reservation.id);
-  const canReportDelay = ["accepted", "working"].includes(reservation.status);
+  const canReportDelay = ["accepted", "working"].includes(reservation.status) && !sentByActiveUser;
   const machine = findMachine(reservation.machineId);
   const icon = categoryIcons[reservation.category] || categoryIcons[machine?.category] || "fa-tractor";
   const requestCode = reservationCode(reservation);
   const equipmentMarkup = reservationEquipmentMarkup(reservation, machine);
   const actionsMarkup = reservationActionsMarkup(reservation, { canResolve, canStartWork, canFinishWork, canDeleteFinished, canRequestReschedule, canReportDelay, canRespondScheduleCounter, canReviewContractor, canReviewProducer });
+  const statusLabel = reservationStatusLabelForCurrentUser(reservation, sentByActiveUser);
 
   return `
     <article class="reservation-card">
@@ -2864,7 +2880,7 @@ function reservationCard(reservation) {
           </div>
         </div>
         <div class="reservation-head-actions">
-          <span class="status-pill status-${reservation.status}">${statusLabels[reservation.status]}</span>
+          <span class="status-pill status-${reservation.status}">${escapeHTML(statusLabel)}</span>
         </div>
       </div>
       ${solicitudLogisticsPanel(reservation, "producer")}
@@ -2881,6 +2897,14 @@ function reservationCard(reservation) {
 function reservationActionsMarkup(reservation, flags) {
   const actions = [];
   if (flags.canResolve) {
+    const requestedSchedule = originalScheduleLabel(reservation);
+    actions.push(`
+      <div class="schedule-action-context">
+        <i class="fa-regular fa-clock"></i>
+        <span>Horario solicitado</span>
+        <strong>${escapeHTML(requestedSchedule)}</strong>
+      </div>
+    `);
     actions.push(`
       <button class="btn ghost reject-reservation" type="button"
         data-reservation-id="${reservation.id}"
@@ -2896,6 +2920,14 @@ function reservationActionsMarkup(reservation, flags) {
     `);
   }
   if (flags.canRespondScheduleCounter) {
+    const proposedSchedule = scheduleProposalLabel(reservation.scheduleProposal);
+    actions.push(`
+      <div class="schedule-action-context">
+        <i class="fa-regular fa-clock"></i>
+        <span>Nuevo horario propuesto</span>
+        <strong>${escapeHTML(proposedSchedule)}</strong>
+      </div>
+    `);
     actions.push(`
       <button class="btn primary accept-schedule-counter-btn" type="button" data-reservation-id="${reservation.id}">
         <i class="fa-solid fa-check"></i> Aceptar propuesta
@@ -2998,6 +3030,13 @@ function scheduleNegotiationSection(reservation, viewContext = "producer") {
   `;
 }
 
+function reservationStatusLabelForCurrentUser(reservation, sentByActiveUser = activeUserRequestedReservation(reservation)) {
+  if (sentByActiveUser && reservation.status === "pending") return "Solicitud enviada";
+  if (sentByActiveUser && reservation.status === "schedule_counter") return "Nuevo horario propuesto";
+  if (sentByActiveUser && reservation.status === "original_kept") return "Horario original enviado";
+  return statusLabels[reservation.status] || reservation.status;
+}
+
 function scheduleProposalLabel(proposal) {
   return formatDateTimeRangeValues(proposal.date, proposal.date, proposal.startTime, proposal.endTime || proposal.startTime);
 }
@@ -3068,14 +3107,15 @@ function rescheduleSection(reservation) {
 }
 
 function reschedulePendingMarkup(request) {
+  const proposedSchedule = formatDateTimeRangeValues(request.proposedStart, request.proposedEnd, request.proposedStartTime, request.proposedEndTime);
   return `
     <div class="reschedule-item">
-      <strong>${formatDateTimeRangeValues(request.proposedStart, request.proposedEnd, request.proposedStartTime, request.proposedEndTime)}</strong>
+      <strong>${proposedSchedule}</strong>
       <small>Pedido por ${profileTrigger({ type: "producer", name: request.requestedByName || request.requestedBy, label: request.requestedByName || request.requestedBy })}. Fecha actual: ${formatDateTimeRangeValues(request.oldStart, request.oldEnd, request.oldStartTime, request.oldEndTime)}.</small>
       ${request.reason ? `<small>Motivo: ${escapeHTML(request.reason)}</small>` : ""}
       <div class="reschedule-actions">
         <button class="btn btn-sm ghost reject-reschedule-btn" type="button" data-reschedule-id="${request.id}">
-          <i class="fa-solid fa-xmark"></i> Rechazar
+          <i class="fa-solid fa-xmark"></i> Rechazar este horario
         </button>
         <button class="btn btn-sm primary accept-reschedule-btn" type="button" data-reschedule-id="${request.id}">
           <i class="fa-solid fa-check"></i> Aceptar
@@ -4145,6 +4185,8 @@ function openRequestModal(machineId) {
   const form = $("#request-form");
   form.reset();
   resetRequestLocation(form);
+  clearTransportLocation(form, "origin");
+  clearTransportLocation(form, "destination");
   hideRequestError();
   formControl(form, "job").value = defaultJobForMachine(machine);
   toggleJobOther(form);
@@ -4294,6 +4336,8 @@ function clearHiddenRequestFields(form, config) {
     formControl(form, "origin").value = "";
     formControl(form, "destination").value = "";
     formControl(form, "cargoType").value = "";
+    clearTransportLocation(form, "origin");
+    clearTransportLocation(form, "destination");
   }
   if (!config.showLocation) clearRequestLocation(form);
 }
@@ -4345,9 +4389,15 @@ function reservationFromForm(form, machine) {
 }
 
 function buildTruckReservationPayload(form) {
+  const originLocation = getTransportLocation(form, "origin");
+  const destinationLocation = getTransportLocation(form, "destination");
   return {
     origin:        clean(formControl(form, "origin").value),
     destination:   clean(formControl(form, "destination").value),
+    originLocation,
+    destinationLocation,
+    location: destinationLocation || originLocation,
+    field: destinationLocation?.address || originLocation?.address || clean(formControl(form, "destination").value) || clean(formControl(form, "origin").value),
     cargoType:     clean(formControl(form, "cargoType").value),
     estimatedTons: requestPositiveNumber(form, "estimatedTons"),
     estimatedBags: requestPositiveNumber(form, "estimatedBags"),
@@ -4449,15 +4499,16 @@ function bindLocationPicker() {
   });
 }
 
-function openLocationPicker(form) {
+function openLocationPicker(form, target = "work") {
   locationPickerState.form = form;
-  locationPickerState.selected = getRequestLocation(form);
+  locationPickerState.target = ["origin", "destination"].includes(target) ? target : "work";
+  locationPickerState.selected = getLocationForPickerTarget(form, locationPickerState.target);
   locationPickerState.searchTimer = null;
   locationPickerState.reverseToken = 0;
   $("#location-picker-modal").hidden = false;
-  $("#location-search-input").value = locationPickerState.selected?.address || "";
+  $("#location-search-input").value = locationPickerState.selected?.address || locationPickerInitialQuery(form, locationPickerState.target);
   hideLocationSearchResults();
-  setLocationPickerStatus("Busca una direccion o toca el mapa para marcar el punto del trabajo.");
+  setLocationPickerStatus(locationPickerHelpText(locationPickerState.target));
   setLocationMapUnavailable(false);
   updateLocationSelectionUI(locationPickerState.selected);
 
@@ -4792,7 +4843,7 @@ function confirmLocationPicker() {
     setLocationPickerStatus("Selecciona un punto valido antes de confirmar.");
     return;
   }
-  setRequestLocation(form, location);
+  setLocationForPickerTarget(form, locationPickerState.target, location);
   updateRequestEstimate(form);
   closeLocationPicker();
   hideRequestError();
@@ -4802,6 +4853,7 @@ function closeLocationPicker() {
   $("#location-picker-modal").hidden = true;
   hideLocationSearchResults();
   locationPickerState.form = null;
+  locationPickerState.target = "work";
 }
 
 function setLocationPickerStatus(message) {
@@ -4863,6 +4915,71 @@ function getRequestLocation(form) {
   const longitude = Number(formControl(form, "locationLongitude").value);
   if (!address || !isValidCoordinate(latitude, longitude)) return null;
   return { address, latitude, longitude };
+}
+
+function locationPickerHelpText(target) {
+  if (target === "origin") return "Busca o toca el mapa para marcar el origen del viaje.";
+  if (target === "destination") return "Busca o toca el mapa para marcar el destino del viaje.";
+  return "Busca una direccion o toca el mapa para marcar el punto del trabajo.";
+}
+
+function locationPickerInitialQuery(form, target) {
+  if (target === "origin" || target === "destination") return clean(formControl(form, target)?.value);
+  return "";
+}
+
+function getLocationForPickerTarget(form, target) {
+  if (target === "origin" || target === "destination") return getTransportLocation(form, target);
+  return getRequestLocation(form);
+}
+
+function setLocationForPickerTarget(form, target, location) {
+  if (target === "origin" || target === "destination") {
+    setTransportLocation(form, target, location);
+    return;
+  }
+  setRequestLocation(form, location);
+}
+
+function setTransportLocation(form, target, location) {
+  const address = clean(location.address) || formatCoordinates(location.latitude, location.longitude);
+  formControl(form, target).value = address;
+  formControl(form, `${target}Address`).value = address;
+  formControl(form, `${target}Latitude`).value = String(location.latitude);
+  formControl(form, `${target}Longitude`).value = String(location.longitude);
+  updateTransportLocationButton(target, address);
+}
+
+function clearTransportLocation(form, target) {
+  formControl(form, `${target}Address`).value = "";
+  formControl(form, `${target}Latitude`).value = "";
+  formControl(form, `${target}Longitude`).value = "";
+  updateTransportLocationButton(target, "");
+}
+
+function clearTransportCoordinates(form, target) {
+  formControl(form, `${target}Address`).value = "";
+  formControl(form, `${target}Latitude`).value = "";
+  formControl(form, `${target}Longitude`).value = "";
+  updateTransportLocationButton(target, "");
+}
+
+function getTransportLocation(form, target) {
+  const address = clean(formControl(form, `${target}Address`)?.value || formControl(form, target)?.value);
+  const latitude = Number(formControl(form, `${target}Latitude`)?.value);
+  const longitude = Number(formControl(form, `${target}Longitude`)?.value);
+  if (!address || !isValidCoordinate(latitude, longitude)) return null;
+  return { address, latitude, longitude };
+}
+
+function updateTransportLocationButton(target, address) {
+  const button = document.querySelector(`[data-location-target="${target}"]`);
+  if (!button) return;
+  const hasAddress = Boolean(clean(address));
+  button.classList.toggle("has-location", hasAddress);
+  button.title = hasAddress ? `Ubicacion seleccionada: ${address}` : "Ubicar en el mapa";
+  const label = button.querySelector("span");
+  if (label) label.textContent = hasAddress ? "Cambiar" : "Mapa";
 }
 function closeRequestModal() {
   $("#request-modal").hidden = true;

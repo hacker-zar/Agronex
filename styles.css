@@ -1086,6 +1086,37 @@ h1, h2, .page-title, .machine-title, .pub-step-hdr h2, .profile-sidebar-card h2 
   justify-content: center;
 }
 
+.schedule-action-context {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 9px;
+  min-height: 54px;
+  padding: 10px 12px;
+  border: 1px solid rgba(56, 118, 29, .22);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.schedule-action-context i {
+  grid-row: span 2;
+  justify-self: center;
+}
+
+.schedule-action-context span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.schedule-action-context strong {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
 .status-track {
   display: grid;
   grid-template-columns: repeat(6, minmax(108px, 1fr));
@@ -1394,7 +1425,21 @@ h1, h2, .page-title, .machine-title, .pub-step-hdr h2, .profile-sidebar-card h2 
 .offer-solicitud-title { font-weight: 700; font-size: 14px; }
 .offer-solicitud-meta  { color: var(--muted); font-size: 12px; }
 .offer-solicitud-actions {
-  display: flex; gap: 7px; justify-content: flex-end; margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.offer-solicitud-actions .schedule-action-context {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.offer-solicitud-actions .btn {
+  width: 100%;
+  justify-content: center;
+  min-width: 0;
 }
 
 .operation-status-card {
@@ -2027,6 +2072,43 @@ label input:focus, label select:focus, label textarea:focus {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent-strong);
+}
+
+.transport-location-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.transport-location-field input {
+  min-width: 0;
+}
+
+.location-map-btn {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid rgba(56, 118, 29, .24);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 850;
+  white-space: nowrap;
+  transition: border-color .18s, box-shadow .18s, background .18s, transform .12s;
+}
+
+.location-map-btn:hover,
+.location-map-btn:focus-visible,
+.location-map-btn.has-location {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  background: var(--surface);
+  outline: none;
 }
 
 .inline-check {
@@ -4357,6 +4439,14 @@ label input:focus, label select:focus, label textarea:focus {
     border-radius: 14px;
     font-size: 16px;
   }
+  .transport-location-field {
+    grid-template-columns: 1fr;
+  }
+  .location-map-btn {
+    min-height: 52px;
+    border-radius: 14px;
+    font-size: 15px;
+  }
   label textarea { min-height: 108px; }
   input[type="checkbox"],
   input[type="radio"] {
@@ -4508,5 +4598,11 @@ label input:focus, label select:focus, label textarea:focus {
   .reservation-card,
   .toast {
     animation-duration: .12s;
+  }
+}
+
+@media (max-width: 600px) {
+  .offer-solicitud-actions {
+    grid-template-columns: 1fr;
   }
 }

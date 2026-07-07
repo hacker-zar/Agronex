@@ -686,11 +686,29 @@
       <div class="form-grid" id="request-transport-fields" hidden>
         <label>
           <span>Origen</span>
-          <input name="origin" maxlength="100" placeholder="Campo, acopio o localidad de origen">
+          <div class="transport-location-field">
+            <input name="origin" maxlength="100" placeholder="Campo, acopio o localidad de origen">
+            <button class="location-map-btn" type="button" data-location-target="origin">
+              <i class="fa-solid fa-map-location-dot"></i>
+              <span>Mapa</span>
+            </button>
+          </div>
+          <input name="originAddress" type="hidden">
+          <input name="originLatitude" type="hidden">
+          <input name="originLongitude" type="hidden">
         </label>
         <label>
           <span>Destino</span>
-          <input name="destination" maxlength="100" placeholder="Silo, puerto, acopio o localidad">
+          <div class="transport-location-field">
+            <input name="destination" maxlength="100" placeholder="Silo, puerto, acopio o localidad">
+            <button class="location-map-btn" type="button" data-location-target="destination">
+              <i class="fa-solid fa-map-location-dot"></i>
+              <span>Mapa</span>
+            </button>
+          </div>
+          <input name="destinationAddress" type="hidden">
+          <input name="destinationLatitude" type="hidden">
+          <input name="destinationLongitude" type="hidden">
         </label>
         <label>
           <span>Tipo de carga</span>
