@@ -364,14 +364,18 @@ const devTestUsers = [
 ];
 
 const devUserSwitcherEnabled = Boolean(import.meta.env?.DEV);
+const SESSION_KEYS = {
+  desktopFiltersCollapsed: "nexudrive_desktop_filters_collapsed",
+};
 
 const state = {
   screen:       "catalogo",
   offersTab:    "activas",
   category:     "Todas",
   search:       "",
-  filters:      { availability: "Todas", service: "Todos", reputation: "Todas", todayOnly: false },
+  filters:      defaultCatalogFilters(),
   filterDraft:  null,
+  desktopFiltersCollapsed: readSessionBoolean(SESSION_KEYS.desktopFiltersCollapsed, false),
   machines:     readJSON(STORAGE_KEYS.machines, seedMachines).map(normalizeMachinePricing),
   reservations: readJSON(STORAGE_KEYS.reservations, []),
   rescheduleRequests: readJSON(STORAGE_KEYS.reschedules, []),
@@ -392,7 +396,23 @@ let notificationGroupTimer = null;
 let notificationToastQueue = [];
 let lastUserActivityAt = Date.now();
 let lastOperationUndo = null;
+let workTrackingSession = null;
 const locationPickerState = { map: null, marker: null, form: null, target: "work", selected: null, operationCircle: null, operationCenterMarker: null, operationCenter: null };
+
+const workTrackingConfig = {
+  minIntervalMs: 15000,
+  pollIntervalMs: 25000,
+  minDistanceMeters: 40,
+  weakAccuracyMeters: 120,
+};
+
+const workTrackingStatuses = {
+  disabled: { label: "Seguimiento desactivado", className: "disabled", icon: "fa-location-slash" },
+  sharing: { label: "Compartiendo ubicacion", className: "sharing", icon: "fa-location-crosshairs" },
+  weak: { label: "Senal GPS debil", className: "weak", icon: "fa-triangle-exclamation" },
+  offline: { label: "Sin conexion", className: "offline", icon: "fa-wifi" },
+  finished: { label: "Seguimiento finalizado", className: "finished", icon: "fa-circle-check" },
+};
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -404,6 +424,7 @@ function init() {
   ensureDevUserFixtures();
   bindDevUserSwitcher();
   bindNavigation();
+  bindDesktopCatalogLayout();
   bindForms();
   bindPublishWizard();
   bindProfile();
@@ -421,11 +442,13 @@ function init() {
   bindDelayModal();
   bindReviewModal();
   bindLocationPicker();
+  bindWorkTracking();
   bindOffersTabs();
   bindOperationSheet();
   bindListActionDelegation();
   syncMachineRatingsFromReviews();
   render();
+  resumeActiveWorkTrackingSession();
   persistMachinePricingMigration();
   openLocationDemoFromQuery();
 }
@@ -764,9 +787,12 @@ function bindNavigation() {
     btn.addEventListener("click", () => showScreen(btn.dataset.nav));
   });
 
-  $("#catalog-search").addEventListener("input", (e) => {
-    state.search = e.target.value.trim().toLowerCase();
-    renderCatalog();
+  [$("#catalog-search"), $("#desktop-catalog-search")].filter(Boolean).forEach((input) => {
+    input.addEventListener("input", (e) => {
+      state.search = e.target.value.trim().toLowerCase();
+      syncCatalogSearchInputs(e.target);
+      renderCatalog();
+    });
   });
 
   $("#filter-toggle").addEventListener("click", openCatalogFilters);
@@ -776,32 +802,95 @@ function bindNavigation() {
   });
 
   $("#availability-filter").addEventListener("change", (e) => {
-    ensureFilterDraft();
-    state.filterDraft.filters.availability = e.target.value;
+    updateCatalogFilter((filters) => { filters.availability = e.target.value; });
   });
   $("#service-filter").addEventListener("change", (e) => {
-    ensureFilterDraft();
-    state.filterDraft.filters.service = e.target.value;
+    updateCatalogFilter((filters) => { filters.service = e.target.value; });
   });
   $("#reputation-filter").addEventListener("change", (e) => {
-    ensureFilterDraft();
-    state.filterDraft.filters.reputation = e.target.value;
+    updateCatalogFilter((filters) => { filters.reputation = e.target.value; });
   });
-  $("#today-filter").addEventListener("change", (e) => {
-    ensureFilterDraft();
-    state.filterDraft.filters.todayOnly = e.target.checked;
+  $("#location-filter")?.addEventListener("input", (e) => {
+    updateCatalogFilter((filters) => {
+      const nextLocation = clean(e.target.value);
+      filters.location = nextLocation;
+      if (!nextLocation || clean(filters.locationPoint?.address) !== nextLocation) filters.locationPoint = null;
+    });
+  });
+  $("#catalog-location-map-btn")?.addEventListener("click", openCatalogLocationPicker);
+  $("#distance-filter")?.addEventListener("input", (e) => {
+    updateCatalogFilter((filters) => { filters.maxDistanceKm = clean(e.target.value); });
+  });
+  $("#price-filter")?.addEventListener("input", (e) => {
+    updateCatalogFilter((filters) => { filters.maxPrice = clean(e.target.value); });
+  });
+  $("#brand-filter")?.addEventListener("input", (e) => {
+    updateCatalogFilter((filters) => { filters.brand = clean(e.target.value); });
+  });
+  $("#power-filter")?.addEventListener("input", (e) => {
+    updateCatalogFilter((filters) => { filters.minPowerHp = clean(e.target.value); });
   });
   $("#catalog-filters-clear").addEventListener("click", resetCatalogFilterDraft);
-  $("#catalog-filters-apply").addEventListener("click", applyCatalogFilters);
+  $("#catalog-filters-apply")?.addEventListener("click", () => applyCatalogFilters({ close: true }));
   $("#catalog-empty-clear").addEventListener("click", () => {
     clearCatalogFilters();
   });
   $("#user-chip").addEventListener("click", () => {
     showScreen(state.auth ? "perfil" : "acceso");
   });
+  bindMachineDetailPanel();
+}
+
+function bindDesktopCatalogLayout() {
+  mountCatalogFiltersForViewport();
+  $("#catalog-filter-collapse")?.addEventListener("click", toggleDesktopCatalogFilters);
+  window.matchMedia("(min-width: 1200px)").addEventListener("change", mountCatalogFiltersForViewport);
+}
+
+function mountCatalogFiltersForViewport() {
+  const panel = $("#catalog-filters-panel");
+  const desktopTarget = $("#catalog-desktop-filters");
+  const modalTarget = $("#catalog-filters-modal-body");
+  if (!panel || !desktopTarget || !modalTarget) return;
+  const useDesktop = window.matchMedia("(min-width: 1200px)").matches;
+  const target = useDesktop ? desktopTarget : modalTarget;
+  if (panel.parentElement !== target) target.prepend(panel);
+  syncDesktopCatalogFilterLayout();
+  if (useDesktop) closeCatalogFilters();
+}
+
+function toggleDesktopCatalogFilters() {
+  if (!window.matchMedia("(min-width: 1200px)").matches) return;
+  state.desktopFiltersCollapsed = !state.desktopFiltersCollapsed;
+  writeSessionBoolean(SESSION_KEYS.desktopFiltersCollapsed, state.desktopFiltersCollapsed);
+  syncDesktopCatalogFilterLayout();
+}
+
+function syncDesktopCatalogFilterLayout() {
+  const layout = $(".catalog-desktop-layout");
+  const button = $("#catalog-filter-collapse");
+  if (!layout || !button) return;
+  const isDesktop = window.matchMedia("(min-width: 1200px)").matches;
+  layout.classList.toggle("filters-collapsed", isDesktop && state.desktopFiltersCollapsed);
+  button.setAttribute("aria-expanded", String(!(isDesktop && state.desktopFiltersCollapsed)));
+  button.setAttribute("aria-label", state.desktopFiltersCollapsed ? "Expandir filtros" : "Colapsar filtros");
+  button.title = state.desktopFiltersCollapsed ? "Expandir filtros" : "Colapsar filtros";
+  const icon = button.querySelector("i");
+  if (icon) {
+    icon.classList.toggle("fa-chevron-left", !state.desktopFiltersCollapsed);
+    icon.classList.toggle("fa-chevron-right", state.desktopFiltersCollapsed);
+  }
+}
+
+function syncCatalogSearchInputs(source = null) {
+  [$("#catalog-search"), $("#desktop-catalog-search")].filter(Boolean).forEach((input) => {
+    if (input !== source) input.value = state.search;
+  });
 }
 
 function openCatalogFilters() {
+  mountCatalogFiltersForViewport();
+  if (window.matchMedia("(min-width: 1200px)").matches) return;
   state.filterDraft = currentCatalogFilterState();
   syncCatalogFilterControls(state.filterDraft.filters);
   renderCategoryFilters();
@@ -816,6 +905,14 @@ function closeCatalogFilters() {
 
 function ensureFilterDraft() {
   if (!state.filterDraft) state.filterDraft = currentCatalogFilterState();
+}
+
+function updateCatalogFilter(updater) {
+  ensureFilterDraft();
+  updater(state.filterDraft.filters);
+  state.filters = { ...state.filterDraft.filters };
+  syncCatalogFilterControls(state.filters);
+  renderCatalog();
 }
 
 function currentCatalogFilterState() {
@@ -1802,6 +1899,7 @@ function renderCategoryFilters() {
 
   $$("#category-filters .filter-chip").forEach((btn) => {
     btn.addEventListener("click", () => {
+      if (state.filterDraft) state.filterDraft.category = btn.dataset.category;
       state.category = btn.dataset.category;
       renderCategoryFilters();
       renderCatalog();
@@ -1813,13 +1911,13 @@ function renderCatalog() {
   const grid = $("#catalog-grid");
   const items = state.machines.filter((m) => {
     const matchesCat = state.category === "Todas" || m.category === state.category;
-    const text = `${m.title} ${m.category} ${m.location} ${m.owner} ${m.availability}`.toLowerCase();
+    const text = `${m.title} ${m.brand || ""} ${m.year || ""} ${m.plate || ""} ${m.category} ${m.location} ${m.owner} ${m.availability}`.toLowerCase();
     return matchesCat
       && (!state.search || text.includes(state.search))
       && matchesAvailabilityFilter(m)
       && matchesServiceFilter(m)
       && matchesReputationFilter(m)
-      && matchesTodayFilter(m);
+      && matchesDesktopCatalogFilters(m);
   });
 
   $("#catalog-empty").hidden = items.length > 0;
@@ -1844,7 +1942,13 @@ function bindCatalogListActions() {
       return;
     }
     const reportButton = event.target.closest(".report-btn");
-    if (reportButton) openReportModal(reportButton.dataset.machineId);
+    if (reportButton) {
+      openReportModal(reportButton.dataset.machineId);
+      return;
+    }
+    if (event.target.closest(".public-profile-trigger")) return;
+    const card = event.target.closest(".machine-card[data-machine-id]");
+    if (card && window.matchMedia("(min-width: 1200px)").matches) openMachineDetailPanel(card.dataset.machineId);
   });
 }
 
@@ -1854,6 +1958,7 @@ function clearCatalogFilters() {
   state.filters = defaultCatalogFilters();
   state.filterDraft = null;
   $("#catalog-search").value = "";
+  syncCatalogSearchInputs($("#catalog-search"));
   syncCatalogFilterControls(state.filters);
   renderCategoryFilters();
   renderCatalog();
@@ -1861,23 +1966,38 @@ function clearCatalogFilters() {
 
 function resetCatalogFilterDraft() {
   state.filterDraft = { category: "Todas", filters: defaultCatalogFilters() };
+  state.category = "Todas";
+  state.filters = { ...state.filterDraft.filters };
   syncCatalogFilterControls(state.filterDraft.filters);
   renderCategoryFilters();
+  renderCatalog();
 }
 
-function applyCatalogFilters() {
+function applyCatalogFilters({ close = false } = {}) {
   ensureFilterDraft();
   state.category = state.filterDraft.category;
   state.filters = { ...state.filterDraft.filters };
-  closeCatalogFilters();
+  syncCatalogFilterControls(state.filters);
+  renderCategoryFilters();
   renderCatalog();
+  if (close) closeCatalogFilters();
 }
 
 function syncCatalogFilterControls(filters = state.filters) {
   if ($("#availability-filter")) $("#availability-filter").value = filters.availability;
   if ($("#service-filter")) $("#service-filter").value = filters.service;
   if ($("#reputation-filter")) $("#reputation-filter").value = filters.reputation;
-  if ($("#today-filter")) $("#today-filter").checked = Boolean(filters.todayOnly);
+  if ($("#location-filter")) $("#location-filter").value = filters.location || "";
+  const locationMapButton = $("#catalog-location-map-btn");
+  if (locationMapButton) {
+    const hasLocationPoint = Boolean(filters.locationPoint);
+    locationMapButton.classList.toggle("has-location", hasLocationPoint);
+    locationMapButton.title = hasLocationPoint ? `Ubicacion seleccionada: ${filters.location || filters.locationPoint.address}` : "Elegir en el mapa";
+  }
+  if ($("#distance-filter")) $("#distance-filter").value = filters.maxDistanceKm || "";
+  if ($("#price-filter")) $("#price-filter").value = filters.maxPrice || "";
+  if ($("#brand-filter")) $("#brand-filter").value = filters.brand || "";
+  if ($("#power-filter")) $("#power-filter").value = filters.minPowerHp || "";
 }
 
 function hasActiveCatalogFilters() {
@@ -1886,12 +2006,18 @@ function hasActiveCatalogFilters() {
     || state.filters.availability !== "Todas"
     || state.filters.service !== "Todos"
     || state.filters.reputation !== "Todas"
-    || Boolean(state.filters.todayOnly);
+    || Boolean(state.filters.location)
+    || Boolean(state.filters.locationPoint)
+    || Boolean(state.filters.maxDistanceKm)
+    || Boolean(state.filters.maxPrice)
+    || Boolean(state.filters.brand)
+    || Boolean(state.filters.minPowerHp);
 }
 
 function matchesAvailabilityFilter(machine) {
   const filter = state.filters.availability;
   if (filter === "Todas") return true;
+  if (filter === "Disponible hoy") return isAvailableToday(machine);
   const slot = availabilitySlotForMachine(machine);
   if (slot) {
     if (filter === "Disponible") return slot.status !== "unavailable";
@@ -1917,6 +2043,43 @@ function matchesReputationFilter(machine) {
   if (filter === "Todas") return true;
   return typeof machine.rating === "number" && machine.rating >= Number(filter);
 }
+
+function matchesDesktopCatalogFilters(machine) {
+  const filters = state.filters;
+  if (filters.location && !matchesCatalogLocationFilter(machine, filters)) return false;
+  if (filters.brand && !textKey(machine.brand || machine.title).includes(textKey(filters.brand))) return false;
+  if (filters.maxDistanceKm) {
+    const maxDistanceKm = Number(filters.maxDistanceKm);
+    const filterPoint = catalogFilterLocationPoint(filters);
+    const machinePoint = filterPoint ? machineLocationCoordinates(machine) : null;
+    const distanceKm = filterPoint && machinePoint
+      ? haversineKm(filterPoint, machinePoint)
+      : (typeof machine.distanceKm === "number" ? machine.distanceKm : null);
+    if (Number.isFinite(distanceKm) && Number.isFinite(maxDistanceKm) && distanceKm > maxDistanceKm) return false;
+  }
+  if (filters.maxPrice && Number(machine.price) > Number(filters.maxPrice)) return false;
+  const machinePower = Number(machine.powerHp || machine.hp || String(machine.title).match(/(\d+)\s*hp/i)?.[1]);
+  if (filters.minPowerHp && Number.isFinite(machinePower) && machinePower < Number(filters.minPowerHp)) return false;
+  return true;
+}
+
+function matchesCatalogLocationFilter(machine, filters) {
+  if (!filters.location) return true;
+  if (filters.locationPoint && filters.maxDistanceKm) return true;
+  const machineLocation = textKey(machine.location);
+  const query = textKey(filters.location);
+  if (!query || machineLocation.includes(query)) return true;
+  const ignoredTerms = new Set(["argentina", "provincia", "partido", "departamento"]);
+  const terms = query.split(/\s+/).filter((term) => term.length > 3 && !ignoredTerms.has(term));
+  return terms.some((term) => machineLocation.includes(term));
+}
+
+function catalogFilterLocationPoint(filters = state.filters) {
+  const point = filters.locationPoint;
+  if (point && isValidCoordinate(point.latitude, point.longitude)) return point;
+  return knownCoordinatesForLocation(filters.location);
+}
+
 function isAvailableToday(machine) {
   const slot = availabilitySlotForMachine(machine);
   if (slot) return slotContainsDate(slot, offsetISODate(0));
@@ -1929,9 +2092,6 @@ function isAvailableTomorrow(machine) {
   const value = textKey(machineAvailabilityLabel(machine));
   return machine.availableTomorrow === true || value.includes("manana") || value.includes("ma\\u00f1ana");
 }
-function matchesTodayFilter(machine) {
-  return !state.filters.todayOnly || isAvailableToday(machine);
-}
 function machineCard(machine) {
   const hasRating   = typeof machine.rating === "number";
   const hasDistance = typeof machine.distanceKm === "number";
@@ -1942,13 +2102,9 @@ function machineCard(machine) {
   const availabilityStatus = slot ? availabilitySlotStatusLabel(slot.status) : "Ventana flexible";
   const slotUnavailable = slot?.status === "unavailable";
   const availabilityClass = availableToday ? "available-today" : (availableTomorrow ? "available-tomorrow" : "");
-  const availabilityBadge = availableToday
-    ? `<span class="availability-badge available-today-badge"><span class="availability-dot available-today-dot" aria-hidden="true"></span> Disponible hoy</span>`
-    : availableTomorrow
-      ? `<span class="availability-badge available-tomorrow-badge"><span class="availability-dot available-tomorrow-dot" aria-hidden="true"></span> Disponible ma\u00f1ana</span>`
-      : "";
+  const availabilityBadge = availabilityBadgeMarkup(machine, slot, availabilityLabel);
   return `
-    <article class="machine-card ${availabilityClass}">
+    <article class="machine-card ${availabilityClass}" data-machine-id="${escapeHTML(machine.id)}">
       <div class="machine-media">
         <i class="fa-solid ${categoryIcons[machine.category] || "fa-tractor"}"></i>
         ${machine.badge ? `<span class="machine-badge">${escapeHTML(machine.badge)}</span>` : ""}
@@ -1982,6 +2138,150 @@ function machineCard(machine) {
       </div>
     </article>
   `;
+}
+
+function availabilityBadgeMarkup(machine, slot, availabilityLabel = "") {
+  if (isAvailableToday(machine)) {
+    return `<span class="availability-badge available-today-badge"><span class="availability-dot available-today-dot" aria-hidden="true"></span> Disponible hoy</span>`;
+  }
+  if (isAvailableTomorrow(machine)) {
+    return `<span class="availability-badge available-tomorrow-badge"><span class="availability-dot available-tomorrow-dot" aria-hidden="true"></span> Disponible ma\u00f1ana</span>`;
+  }
+  if (isAvailableThisWeek(machine, slot, availabilityLabel)) {
+    return `<span class="availability-badge available-week-badge"><span class="availability-dot available-week-dot" aria-hidden="true"></span> Disponible esta semana</span>`;
+  }
+  const futureDate = futureAvailabilityDate(slot, availabilityLabel);
+  if (futureDate) {
+    return `<span class="availability-badge available-future-badge"><span class="availability-dot available-future-dot" aria-hidden="true"></span> Desde ${escapeHTML(formatDate(futureDate))}</span>`;
+  }
+  return "";
+}
+
+function isAvailableThisWeek(machine, slot, availabilityLabel = "") {
+  if (slot && slotOverlapsDateWindow(slot, 2, 7)) return true;
+  const value = textKey(availabilityLabel || machine?.availability);
+  return value.includes("esta semana") || value.includes("proximos dias") || value.includes("proximos dias");
+}
+
+function futureAvailabilityDate(slot, availabilityLabel = "") {
+  if (slot?.startDate && slot.startDate > offsetISODate(1)) return slot.startDate;
+  const match = clean(availabilityLabel).match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  return match?.[1] || "";
+}
+
+function bindMachineDetailPanel() {
+  $("#machine-detail-close")?.addEventListener("click", closeMachineDetailPanel);
+  $("#machine-detail-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "machine-detail-modal") closeMachineDetailPanel();
+    const requestButton = event.target.closest(".request-btn");
+    if (requestButton) {
+      closeMachineDetailPanel();
+      openRequestModal(requestButton.dataset.machineId);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("#machine-detail-modal")?.hidden) closeMachineDetailPanel();
+  });
+}
+
+function openMachineDetailPanel(machineId) {
+  const machine = findMachine(machineId);
+  if (!machine) return;
+  const modal = $("#machine-detail-modal");
+  const content = $("#machine-detail-content");
+  if (!modal || !content) return;
+  content.innerHTML = machineDetailMarkup(machine);
+  modal.hidden = false;
+}
+
+function closeMachineDetailPanel() {
+  const modal = $("#machine-detail-modal");
+  if (modal) modal.hidden = true;
+}
+
+function machineDetailMarkup(machine) {
+  const slot = availabilitySlotForMachine(machine);
+  const hasRating = typeof machine.rating === "number";
+  const specs = [
+    ["Marca", machine.brand || "Sin cargar"],
+    ["A\u00f1o", machine.year || "Sin cargar"],
+    ["Categoria", machine.category],
+    ["Patente", normalizePlate(machine.plate || "") || "Sin cargar"],
+    ["Operario", machine.operator ? "Incluido" : "A coordinar"],
+    ["Estado", offerStatusLabels[machine.offerStatus || "active"] || "Activa"],
+  ];
+  return `
+    <div class="machine-detail-hero">
+      <div class="machine-detail-media">
+        <i class="fa-solid ${categoryIcons[machine.category] || "fa-tractor"}"></i>
+        ${machine.badge ? `<span class="machine-badge">${escapeHTML(machine.badge)}</span>` : ""}
+      </div>
+      <div class="machine-detail-summary">
+        <span class="category-pill">${escapeHTML(machine.category)}</span>
+        <h2 id="machine-detail-title">${escapeHTML(machine.title)}</h2>
+        <p>${escapeHTML(machine.description || "Equipo disponible para coordinar trabajo.")}</p>
+        <div class="machine-detail-price">
+          <strong>${priceAmountLabel(machine)}</strong>
+          <span>${priceUnitPreviewLabel(machine.priceUnit)}</span>
+        </div>
+        <button class="btn primary request-btn" type="button" data-machine-id="${escapeHTML(machine.id)}" ${slot?.status === "unavailable" ? "disabled" : ""}>
+          <i class="fa-solid fa-calendar-plus"></i> ${slot?.status === "unavailable" ? "No disponible" : "Solicitar"}
+        </button>
+      </div>
+    </div>
+    <div class="machine-detail-grid">
+      <section class="machine-detail-section">
+        <h3>Especificaciones</h3>
+        <dl class="machine-detail-specs">
+          ${specs.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(String(value))}</dd></div>`).join("")}
+        </dl>
+      </section>
+      <section class="machine-detail-section">
+        <h3>Disponibilidad</h3>
+        <div class="machine-detail-availability">
+          <i class="fa-regular fa-calendar-check"></i>
+          <div>
+            <strong>${escapeHTML(machineAvailabilityLabel(machine))}</strong>
+            <span>${escapeHTML(slot ? availabilitySlotStatusLabel(slot.status) : "Ventana flexible")}</span>
+          </div>
+        </div>
+        <div class="machine-detail-calendar">
+          ${machineDetailCalendarDays(slot)}
+        </div>
+      </section>
+      <section class="machine-detail-section">
+        <h3>Propietario</h3>
+        <div class="machine-detail-owner">
+          <span class="user-chip-avatar">${escapeHTML(initialsFor(machine.owner || "AG"))}</span>
+          <div>
+            <strong>${profileTrigger({ type: "contractor", machineId: machine.id, label: machine.owner })}</strong>
+            <span>${escapeHTML(machine.location || "Zona sin cargar")}</span>
+            ${hasRating ? `<small><i class="fa-solid fa-star"></i> ${machine.rating.toFixed(1)}${machine.reviews ? ` (${machine.reviews})` : ""}</small>` : ""}
+          </div>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function machineDetailCalendarDays(slot) {
+  const today = new Date();
+  const selected = new Set();
+  if (slot?.startDate && slot?.endDate) {
+    for (let offset = 0; offset < 14; offset += 1) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + offset);
+      const iso = date.toISOString().slice(0, 10);
+      if (iso >= slot.startDate && iso <= slot.endDate) selected.add(iso);
+    }
+  }
+  return Array.from({ length: 14 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + index);
+    const iso = date.toISOString().slice(0, 10);
+    const active = selected.size ? selected.has(iso) : index < 3;
+    return `<span class="${active ? "available" : ""}"><small>${date.toLocaleDateString("es-AR", { weekday: "short" })}</small>${date.getDate()}</span>`;
+  }).join("");
 }
 
 /* MIS OFERTAS */
@@ -2240,8 +2540,10 @@ function contractorOperationPanel(reservation) {
   const next = nextOperationState(current.key, reservation);
   const incidents = operationIncidentsMarkup(reservation);
   const locationNote = reservation.locationSharingActive
-    ? `<p class="operation-location-note"><i class="fa-solid fa-location-crosshairs"></i> Ubicacion compartida durante esta contratacion.</p>`
-    : "";
+    ? `<p class="operation-location-note"><i class="fa-solid fa-location-crosshairs"></i> Compartiendo ubicacion durante este trabajo.</p>`
+    : reservation.workTracking?.status === "finished"
+      ? `<p class="operation-location-note finished"><i class="fa-solid fa-circle-check"></i> El seguimiento GPS se detuvo al finalizar.</p>`
+      : "";
   return `
     <section class="operation-status-card" aria-label="Seguimiento operativo">
       <div class="operation-status-head">
@@ -2263,6 +2565,7 @@ function contractorOperationPanel(reservation) {
         <button class="btn ghost open-operation-sheet-btn" type="button" data-reservation-id="${reservation.id}"><i class="fa-solid fa-sliders"></i> Actualizar estado</button>
       </div>
       ${locationNote}
+      ${workTrackingPanel(reservation, "contractor")}
       ${incidents}
     </section>
   `;
@@ -2454,8 +2757,8 @@ function applyOperationState(reservationId, operationKey) {
     reservation.status = "done";
     reservation.completedAt = now;
     reservation.resolvedAt = now;
-    reservation.locationSharingActive = false;
   }
+  syncWorkTrackingForOperationState(reservation, next.key);
   saveReservations();
   notifyProducerOperationUpdate(reservation, next);
   if (next.key === "done") emitReviewNotificationsForCompletedJob(reservation);
@@ -2463,12 +2766,14 @@ function applyOperationState(reservationId, operationKey) {
   renderMisOfertas();
   updateBadges();
   showOperationUndoToast("Estado actualizado correctamente.", () => restoreOperationSnapshot(previous));
-  if (next.key === "on_way_origin" && !reservation.locationSharePrompted) promptLocationSharing(reservation.id);
 }
 
 function restoreOperationSnapshot(snapshot) {
   const index = state.reservations.findIndex((item) => item.id === snapshot.id);
   if (index === -1) return;
+  if (workTrackingSession?.reservationId === snapshot.id && !isWorkTrackingOperationActive(snapshot.operationStatus)) {
+    stopWorkTrackingSession(snapshot.id, "disabled");
+  }
   state.reservations[index] = snapshot;
   saveReservations();
   renderReservations();
@@ -2478,11 +2783,12 @@ function restoreOperationSnapshot(snapshot) {
 }
 
 function notifyProducerOperationUpdate(reservation, stateMeta) {
+  const message = workTrackingNotificationForState(stateMeta.key, reservation);
   createNotification({
     user_id: clean(reservation.requestedBy) || currentUserId(),
     type: "system",
-    title: "Seguimiento actualizado",
-    body: stateMeta.notify || stateMeta.label,
+    title: message.title,
+    body: message.body || stateMeta.notify || stateMeta.label,
     priority: stateMeta.key === "done" ? "HIGH" : "MEDIUM",
     related_id: reservation.id,
   });
@@ -2505,20 +2811,219 @@ function promptLocationSharing(reservationId) {
 function enableOperationLocationSharing(reservationId) {
   const reservation = state.reservations.find((item) => item.id === reservationId);
   if (!reservation) return;
-  reservation.locationSharingActive = true;
-  reservation.locationSharedAt = new Date().toISOString();
-  saveReservations();
-  renderMisOfertas();
-  renderReservations();
-  createNotification({
-    user_id: clean(reservation.requestedBy) || currentUserId(),
-    type: "system",
-    title: "Ubicacion compartida",
-    body: "El contratista comparte su ubicacion durante el viaje.",
-    priority: "MEDIUM",
-    related_id: reservation.id,
+  if (!isWorkTrackingOperationActive(reservation.operationStatus)) return;
+  startWorkTrackingSession(reservation.id, { force: true });
+}
+
+function bindWorkTracking() {
+  window.addEventListener("online", () => updateActiveWorkTrackingConnection("sharing"));
+  window.addEventListener("offline", () => updateActiveWorkTrackingConnection("offline"));
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && workTrackingSession) requestWorkTrackingPoint(workTrackingSession.reservationId, true);
   });
-  showToast("Ubicacion compartida durante esta contratacion.");
+  ["#reservations-list", "#offers-list"].forEach((selector) => {
+    $(selector)?.addEventListener("click", (event) => {
+      const centerButton = event.target.closest(".center-tracking-map-btn");
+      if (centerButton) {
+        centerWorkTrackingMap(centerButton.dataset.reservationId);
+        return;
+      }
+      const retryButton = event.target.closest(".retry-tracking-btn");
+      if (retryButton) {
+        startWorkTrackingSession(retryButton.dataset.reservationId, { force: true });
+      }
+    });
+  });
+}
+
+function resumeActiveWorkTrackingSession() {
+  const activeReservation = state.reservations.find((reservation) => (
+    activeUserOwnsReservationMachine(reservation)
+    && reservation.workTracking?.active
+    && isWorkTrackingOperationActive(reservation.operationStatus)
+  ));
+  if (activeReservation) startWorkTrackingSession(activeReservation.id);
+}
+
+function syncWorkTrackingForOperationState(reservation, operationKey) {
+  if (!reservation) return;
+  if (operationKey === "done") {
+    finishWorkTracking(reservation);
+    return;
+  }
+  if (!isWorkTrackingOperationActive(operationKey)) {
+    stopWorkTrackingSession(reservation.id, "disabled");
+    updateReservationTracking(reservation, { status: "disabled", active: false });
+    return;
+  }
+  if (isWorkTrackingStartState(operationKey) || reservation.workTracking?.active) {
+    startWorkTrackingSession(reservation.id);
+  }
+}
+
+function isWorkTrackingStartState(key) {
+  return clean(key).startsWith("on_way");
+}
+
+function isWorkTrackingOperationActive(key) {
+  const value = clean(key);
+  return value.startsWith("on_way")
+    || value.startsWith("arrived")
+    || value.startsWith("working")
+    || value === "loading"
+    || value === "unloading";
+}
+
+function startWorkTrackingSession(reservationId, options = {}) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation || !activeUserOwnsReservationMachine(reservation)) return;
+  if (!navigator.geolocation) {
+    updateReservationTracking(reservation, { status: "weak", active: false, error: "Tu navegador no permite obtener GPS." });
+    saveAndRenderWorkTracking();
+    showToast("Este navegador no permite compartir ubicacion GPS.");
+    return;
+  }
+  if (!navigator.onLine) {
+    updateReservationTracking(reservation, { status: "offline", active: true });
+    saveAndRenderWorkTracking();
+    return;
+  }
+  stopWorkTrackingSession(workTrackingSession?.reservationId, "disabled", { silent: true });
+  updateReservationTracking(reservation, { status: "sharing", active: true, startedAt: reservation.workTracking?.startedAt || new Date().toISOString(), error: "" });
+  saveAndRenderWorkTracking();
+  try {
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => handleWorkTrackingPosition(reservationId, position),
+      (error) => handleWorkTrackingError(reservationId, error),
+      { enableHighAccuracy: true, maximumAge: workTrackingConfig.pollIntervalMs, timeout: 12000 },
+    );
+    const pollId = window.setInterval(() => requestWorkTrackingPoint(reservationId), workTrackingConfig.pollIntervalMs);
+    workTrackingSession = { reservationId, watchId, pollId };
+    requestWorkTrackingPoint(reservationId, Boolean(options.force));
+    showToast("Compartiendo ubicacion durante este trabajo.");
+  } catch {
+    updateReservationTracking(reservation, { status: "weak", active: false, error: "No pudimos iniciar el GPS." });
+    saveAndRenderWorkTracking();
+  }
+}
+
+function requestWorkTrackingPoint(reservationId, force = false) {
+  if (!navigator.geolocation || !navigator.onLine) return;
+  navigator.geolocation.getCurrentPosition(
+    (position) => handleWorkTrackingPosition(reservationId, position, force),
+    (error) => handleWorkTrackingError(reservationId, error),
+    { enableHighAccuracy: true, maximumAge: force ? 0 : workTrackingConfig.pollIntervalMs, timeout: 12000 },
+  );
+}
+
+function handleWorkTrackingPosition(reservationId, position, force = false) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation || !isWorkTrackingOperationActive(reservation.operationStatus)) {
+    stopWorkTrackingSession(reservationId, "disabled");
+    return;
+  }
+  const point = workTrackingPointFromPosition(position);
+  if (!force && !shouldStoreWorkTrackingPoint(reservation, point)) return;
+  const status = point.accuracy > workTrackingConfig.weakAccuracyMeters ? "weak" : "sharing";
+  updateReservationTracking(reservation, {
+    status,
+    active: true,
+    lastPoint: point,
+    lastUpdateAt: point.createdAt,
+    error: status === "weak" ? "Senal GPS debil." : "",
+  });
+  saveAndRenderWorkTracking();
+}
+
+function handleWorkTrackingError(reservationId, error) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  const denied = error?.code === 1;
+  updateReservationTracking(reservation, {
+    status: denied ? "disabled" : "weak",
+    active: !denied,
+    error: denied ? "Permiso de ubicacion denegado." : "No pudimos obtener una ubicacion precisa.",
+  });
+  if (denied) stopWorkTrackingSession(reservationId, "disabled", { silent: true });
+  saveAndRenderWorkTracking();
+  if (denied) showToast("Para compartir ubicacion, habilita el permiso GPS del navegador.");
+}
+
+function workTrackingPointFromPosition(position) {
+  const coords = position.coords || {};
+  return {
+    latitude: Number(coords.latitude),
+    longitude: Number(coords.longitude),
+    accuracy: Math.round(Number(coords.accuracy || 0)),
+    speed: Number.isFinite(coords.speed) ? Number(coords.speed) : null,
+    heading: Number.isFinite(coords.heading) ? Number(coords.heading) : null,
+    createdAt: new Date(position.timestamp || Date.now()).toISOString(),
+  };
+}
+
+function shouldStoreWorkTrackingPoint(reservation, point) {
+  const previous = reservation.workTracking?.lastPoint;
+  const lastAt = new Date(reservation.workTracking?.lastUpdateAt || 0).getTime();
+  if (!previous || !isValidCoordinate(previous.latitude, previous.longitude)) return true;
+  const elapsed = Date.now() - lastAt;
+  const meters = haversineKm(previous, point) * 1000;
+  return elapsed >= workTrackingConfig.minIntervalMs || meters >= workTrackingConfig.minDistanceMeters;
+}
+
+function updateReservationTracking(reservation, patch) {
+  const previous = reservation.workTracking || {};
+  reservation.workTracking = compactRecord({
+    ...previous,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  });
+  reservation.locationSharingActive = reservation.workTracking.active === true && reservation.workTracking.status !== "finished";
+  if (reservation.workTracking.lastPoint) reservation.lastLocationPoint = reservation.workTracking.lastPoint;
+}
+
+function finishWorkTracking(reservation) {
+  stopWorkTrackingSession(reservation.id, "finished");
+  updateReservationTracking(reservation, {
+    status: "finished",
+    active: false,
+    finishedAt: new Date().toISOString(),
+    lastPoint: reservation.workTracking?.lastPoint || reservation.lastLocationPoint || null,
+  });
+}
+
+function stopWorkTrackingSession(reservationId, finalStatus = "disabled", options = {}) {
+  if (!workTrackingSession || (reservationId && workTrackingSession.reservationId !== reservationId)) return;
+  if (typeof workTrackingSession.watchId === "number" && navigator.geolocation) navigator.geolocation.clearWatch(workTrackingSession.watchId);
+  if (workTrackingSession.pollId) window.clearInterval(workTrackingSession.pollId);
+  const stoppedId = workTrackingSession.reservationId;
+  workTrackingSession = null;
+  const reservation = state.reservations.find((item) => item.id === stoppedId);
+  if (reservation && finalStatus !== "finished") updateReservationTracking(reservation, { status: finalStatus, active: false });
+  if (!options.silent && finalStatus === "finished") showToast("Seguimiento GPS detenido.");
+}
+
+function updateActiveWorkTrackingConnection(status) {
+  if (!workTrackingSession) return;
+  const reservation = state.reservations.find((item) => item.id === workTrackingSession.reservationId);
+  if (!reservation) return;
+  updateReservationTracking(reservation, { status });
+  saveAndRenderWorkTracking();
+  if (status === "sharing") requestWorkTrackingPoint(reservation.id, true);
+}
+
+function saveAndRenderWorkTracking() {
+  saveReservations();
+  renderReservations();
+  renderMisOfertas();
+}
+
+function workTrackingNotificationForState(key, reservation) {
+  const machineTitle = clean(reservation.machineTitle || "La maquinaria");
+  if (clean(key).startsWith("on_way")) return { title: "El contratista salio hacia el lote", body: `${machineTitle} ya esta en camino.` };
+  if (clean(key).startsWith("arrived")) return { title: "El contratista llego al lote", body: `${machineTitle} llego al punto de trabajo.` };
+  if (clean(key).startsWith("working") || key === "loading") return { title: "El trabajo comenzo", body: `${machineTitle} esta trabajando.` };
+  if (key === "done") return { title: "El trabajo finalizo", body: `${machineTitle} fue marcado como finalizado.` };
+  return { title: "Seguimiento actualizado", body: "" };
 }
 
 function showOperationUndoToast(message, onUndo) {
@@ -2891,6 +3396,118 @@ function logisticsMapFallback() {
     </div>
   `;
 }
+
+function workTrackingPanel(reservation, viewContext = "producer") {
+  if (!visibleReservationForActiveUser(reservation)) return "";
+  if (!operationVisibleForReservation(reservation) && !reservation.workTracking) return "";
+  const tracking = normalizedWorkTracking(reservation);
+  const meta = workTrackingStatuses[tracking.status] || workTrackingStatuses.disabled;
+  const contractorView = viewContext === "contractor";
+  const hasPoint = tracking.lastPoint && isValidCoordinate(tracking.lastPoint.latitude, tracking.lastPoint.longitude);
+  const map = hasPoint ? workTrackingMapMarkup(reservation, tracking.lastPoint) : workTrackingMapFallback(tracking.status);
+  const updateLabel = tracking.lastUpdateAt ? timeAgo(tracking.lastUpdateAt) : "Sin ubicacion registrada";
+  const contractorNote = contractorView
+    ? tracking.active
+      ? "Compartiendo ubicacion durante este trabajo"
+      : tracking.status === "finished"
+        ? "El seguimiento se detuvo al finalizar"
+        : "El seguimiento se activara al marcar En camino"
+    : tracking.active
+      ? "Seguimiento activo para esta reserva"
+      : tracking.status === "finished"
+        ? "Ultima ubicacion informativa"
+        : "Esperando inicio del traslado";
+  const retryAction = contractorView && ["weak", "offline", "disabled"].includes(tracking.status) && isWorkTrackingOperationActive(reservation.operationStatus)
+    ? `<button class="btn ghost retry-tracking-btn" type="button" data-reservation-id="${escapeHTML(reservation.id)}"><i class="fa-solid fa-rotate"></i> Reintentar GPS</button>`
+    : "";
+  return `
+    <section class="work-tracking-card ${meta.className}" aria-label="Seguimiento del trabajo">
+      <div class="work-tracking-head">
+        <div>
+          <span class="work-tracking-eyebrow">Seguimiento del trabajo</span>
+          <h4>${escapeHTML(contractorNote)}</h4>
+        </div>
+        <span class="tracking-state-pill ${meta.className}">
+          <i class="fa-solid ${meta.icon}"></i> ${escapeHTML(meta.label)}
+        </span>
+      </div>
+      <div class="work-tracking-grid">
+        ${map}
+        <div class="work-tracking-meta">
+          <div>
+            <span>Estado actual</span>
+            <strong>${escapeHTML(currentOperationState(reservation).label)}</strong>
+          </div>
+          <div>
+            <span>Ultima actualizacion</span>
+            <strong>${escapeHTML(updateLabel)}</strong>
+          </div>
+          ${tracking.error ? `<p class="tracking-error"><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHTML(tracking.error)}</p>` : ""}
+          <div class="work-tracking-actions">
+            <button class="btn ghost center-tracking-map-btn" type="button" data-reservation-id="${escapeHTML(reservation.id)}" ${hasPoint ? "" : "disabled"}>
+              <i class="fa-solid fa-location-crosshairs"></i> Centrar mapa
+            </button>
+            ${retryAction}
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function normalizedWorkTracking(reservation) {
+  const tracking = reservation.workTracking || {};
+  const status = clean(tracking.status) || (reservation.status === "done" ? "finished" : "disabled");
+  return {
+    status,
+    active: tracking.active === true && status !== "finished" && isWorkTrackingOperationActive(reservation.operationStatus),
+    lastPoint: tracking.lastPoint || reservation.lastLocationPoint || null,
+    lastUpdateAt: tracking.lastUpdateAt || tracking.lastPoint?.createdAt || reservation.lastLocationPoint?.createdAt || "",
+    error: clean(tracking.error),
+  };
+}
+
+function workTrackingMapMarkup(reservation, point) {
+  const lat = Number(point.latitude);
+  const lon = Number(point.longitude);
+  const src = workTrackingMapSrc(point);
+  return `
+    <div class="work-tracking-map">
+      <iframe title="Ubicacion actual de ${escapeHTML(reservation.machineTitle)}" loading="lazy" src="${src}" data-tracking-map="${escapeHTML(reservation.id)}"></iframe>
+      <div class="work-tracking-map-caption">
+        <span><i class="fa-solid fa-tractor"></i> Maquinaria</span>
+        <small>${escapeHTML(formatCoordinates(lat, lon))}${point.accuracy ? ` - precision ${Math.round(point.accuracy)} m` : ""}</small>
+      </div>
+    </div>
+  `;
+}
+
+function workTrackingMapSrc(point) {
+  const lat = Number(point.latitude);
+  const lon = Number(point.longitude);
+  const delta = 0.01;
+  const bbox = [lon - delta, lat - delta, lon + delta, lat + delta].join("%2C");
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat}%2C${lon}`;
+}
+
+function workTrackingMapFallback(status) {
+  const label = status === "finished" ? "No quedo un punto GPS registrado." : "Todavia no hay punto GPS para mostrar.";
+  return `
+    <div class="work-tracking-map-fallback">
+      <i class="fa-solid fa-map-location-dot"></i>
+      <strong>${escapeHTML(label)}</strong>
+    </div>
+  `;
+}
+
+function centerWorkTrackingMap(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  const point = normalizedWorkTracking(reservation || {}).lastPoint;
+  const iframe = document.querySelector(`[data-tracking-map="${CSS.escape(reservationId)}"]`);
+  if (!point || !iframe) return;
+  iframe.src = workTrackingMapSrc(point);
+}
+
 function pendingRequestsForMachine(machineId) {
   return state.reservations.filter((r) => r.machineId === machineId && isContractorNegotiationStatus(r));
 }
@@ -3056,6 +3673,7 @@ function reservationCard(reservation) {
       ${solicitudLogisticsPanel(reservation, "producer")}
       ${scheduleNegotiationSection(reservation, "producer")}
       ${reservationStatusTrack(reservation)}
+      ${workTrackingPanel(reservation, "producer")}
       ${rescheduleSection(reservation)}
       ${delaySection(reservation)}
       ${equipmentMarkup}
@@ -4325,6 +4943,7 @@ function setReservationStatus(id, status) {
   if (status === "done") {
     res.completedAt = now;
     res.startedAt = res.startedAt || now;
+    finishWorkTracking(res);
   }
   if (["cancelled", "rejected"].includes(status) && (res.acceptedAt || res.startedAt)) res.wasAccepted = true;
   res.status = status;
@@ -4669,7 +5288,7 @@ function bindLocationPicker() {
 
 function openLocationPicker(form, target = "work") {
   locationPickerState.form = form;
-  locationPickerState.target = ["origin", "destination"].includes(target) ? target : "work";
+  locationPickerState.target = ["origin", "destination", "catalog-filter"].includes(target) ? target : "work";
   locationPickerState.selected = getLocationForPickerTarget(form, locationPickerState.target);
   locationPickerState.searchTimer = null;
   locationPickerState.reverseToken = 0;
@@ -5007,8 +5626,17 @@ function useManualCoordinates() {
 function confirmLocationPicker() {
   const form = locationPickerState.form;
   const location = locationPickerState.selected;
-  if (!form || !location || !isValidCoordinate(location.latitude, location.longitude)) {
+  if (!location || !isValidCoordinate(location.latitude, location.longitude)) {
     setLocationPickerStatus("Selecciona un punto valido antes de confirmar.");
+    return;
+  }
+  if (locationPickerState.target === "catalog-filter") {
+    setCatalogLocationFilter(location);
+    closeLocationPicker();
+    return;
+  }
+  if (!form) {
+    setLocationPickerStatus("No pudimos conectar esta ubicacion con el formulario.");
     return;
   }
   setLocationForPickerTarget(form, locationPickerState.target, location);
@@ -5077,6 +5705,23 @@ function updateRequestLocationButton(address) {
   label.textContent = hasAddress ? address : "Seleccionar ubicacion";
 }
 
+function openCatalogLocationPicker() {
+  ensureFilterDraft();
+  openLocationPicker(null, "catalog-filter");
+}
+
+function setCatalogLocationFilter(location) {
+  const address = clean(location.address) || formatCoordinates(location.latitude, location.longitude);
+  updateCatalogFilter((filters) => {
+    filters.location = address;
+    filters.locationPoint = {
+      address,
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
+    };
+  });
+}
+
 function getRequestLocation(form) {
   const address = clean(formControl(form, "locationAddress").value || formControl(form, "field").value);
   const latitude = Number(formControl(form, "locationLatitude").value);
@@ -5088,20 +5733,27 @@ function getRequestLocation(form) {
 function locationPickerHelpText(target) {
   if (target === "origin") return "Busca o toca el mapa para marcar el origen del viaje.";
   if (target === "destination") return "Busca o toca el mapa para marcar el destino del viaje.";
+  if (target === "catalog-filter") return "Busca una zona o toca el mapa para filtrar maquinaria cerca de esa ubicacion.";
   return "Busca una direccion o toca el mapa para marcar el punto del trabajo.";
 }
 
 function locationPickerInitialQuery(form, target) {
+  if (target === "catalog-filter") return clean(state.filterDraft?.filters?.location || state.filters.location);
   if (target === "origin" || target === "destination") return clean(formControl(form, target)?.value);
   return "";
 }
 
 function getLocationForPickerTarget(form, target) {
+  if (target === "catalog-filter") return catalogFilterLocationPoint(state.filterDraft?.filters || state.filters);
   if (target === "origin" || target === "destination") return getTransportLocation(form, target);
   return getRequestLocation(form);
 }
 
 function setLocationForPickerTarget(form, target, location) {
+  if (target === "catalog-filter") {
+    setCatalogLocationFilter(location);
+    return;
+  }
   if (target === "origin" || target === "destination") {
     setTransportLocation(form, target, location);
     return;
@@ -5873,6 +6525,25 @@ function readJSON(key, fallback) {
 }
 function readObject(key, fallback) {
   return storageService.getObject(key, fallback);
+}
+
+function readSessionBoolean(key, fallback = false) {
+  try {
+    const value = window.sessionStorage?.getItem(key);
+    if (value === "true") return true;
+    if (value === "false") return false;
+  } catch {
+    return fallback;
+  }
+  return fallback;
+}
+
+function writeSessionBoolean(key, value) {
+  try {
+    window.sessionStorage?.setItem(key, value ? "true" : "false");
+  } catch {
+    // Session memory is a UX nicety; ignore storage failures.
+  }
 }
 
 /* UTILS */

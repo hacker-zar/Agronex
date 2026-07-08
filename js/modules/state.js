@@ -17,5 +17,15 @@ export const STORAGE_KEYS = {
 };
 
 export function defaultCatalogFilters() {
-  return { availability: "Todas", service: "Todos", reputation: "Todas", todayOnly: false };
+  return {
+    availability: "Todas",
+    service: "Todos",
+    reputation: "Todas",
+    location: "",
+    locationPoint: null,
+    maxDistanceKm: "",
+    maxPrice: "",
+    brand: "",
+    minPowerHp: "",
+  };
 }

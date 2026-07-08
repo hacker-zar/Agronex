@@ -25,6 +25,13 @@
       </span>
     </button>
 
+    <div class="desktop-header-search" aria-label="Busqueda de catalogo">
+      <div class="search-box">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input id="desktop-catalog-search" type="search" placeholder="Buscar maquinaria, marca, modelo o ubicacion...">
+      </div>
+    </div>
+
     <nav class="main-nav" aria-label="Navegacion principal">
       <button class="nav-btn active" type="button" data-nav="catalogo">
         <i class="fa-solid fa-tractor"></i>
@@ -70,23 +77,31 @@
     <!-- CATALOGO -->
     <section class="screen active" id="screen-catalogo" aria-labelledby="catalogo-title">
       <h1 id="catalogo-title" class="sr-only">Catalogo de maquinaria</h1>
-      <div class="catalog-toolbar">
-        <div class="search-box">
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <input id="catalog-search" type="search" placeholder="Buscar equipo, marca o zona...">
+      <div class="catalog-desktop-layout">
+        <aside class="catalog-desktop-sidebar" id="catalog-desktop-filters" aria-label="Filtros de catalogo">
+          <button class="catalog-filter-collapse-btn" type="button" id="catalog-filter-collapse" aria-label="Colapsar filtros" aria-expanded="true" title="Colapsar filtros">
+            <i class="fa-solid fa-chevron-left"></i>
+          </button>
+        </aside>
+        <div class="catalog-main">
+          <div class="catalog-toolbar">
+            <div class="search-box">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input id="catalog-search" type="search" placeholder="Buscar equipo, marca o zona...">
+            </div>
+            <button class="filter-icon-btn" type="button" id="filter-toggle" aria-label="Filtros" onclick="window.openCatalogFilters?.()">
+              <i class="fa-solid fa-sliders"></i>
+            </button>
+          </div>
+
+          <p class="results-meta" id="results-meta">0 resultados</p>
+          <div class="catalog-grid" id="catalog-grid"></div>
+          <div class="empty-state" id="catalog-empty" hidden>
+            <i class="fa-regular fa-folder-open"></i>
+            <p id="catalog-empty-text">No hay maquinaria para esta busqueda.</p>
+            <button class="btn ghost" type="button" id="catalog-empty-clear">Limpiar filtros</button>
+          </div>
         </div>
-        <button class="filter-icon-btn" type="button" id="filter-toggle" aria-label="Filtros" onclick="window.openCatalogFilters?.()">
-          <i class="fa-solid fa-sliders"></i>
-        </button>
-      </div>
-
-
-      <p class="results-meta" id="results-meta">0 resultados</p>
-      <div class="catalog-grid" id="catalog-grid"></div>
-      <div class="empty-state" id="catalog-empty" hidden>
-        <i class="fa-regular fa-folder-open"></i>
-        <p id="catalog-empty-text">No hay maquinaria para esta busqueda.</p>
-        <button class="btn ghost" type="button" id="catalog-empty-clear">Limpiar filtros</button>
       </div>
     </section>
 
@@ -556,12 +571,14 @@
           <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
+      <div id="catalog-filters-modal-body">
       <div class="catalog-filters-panel" id="catalog-filters-panel">
         <div class="filter-group">
           <label>
             <span>Disponibilidad</span>
             <select id="availability-filter">
               <option value="Todas">Todas</option>
+              <option value="Disponible hoy">Disponible hoy</option>
               <option value="Disponible">Disponible</option>
               <option value="Esta semana">Esta semana</option>
               <option value="Proxima semana">Proxima semana</option>
@@ -590,21 +607,51 @@
               <option value="4.8">4.8+ estrellas</option>
             </select>
           </label>
+          <label class="desktop-filter-only">
+            <span>Ubicacion</span>
+            <span class="filter-location-field">
+              <input id="location-filter" type="search" placeholder="Ciudad o provincia">
+              <button class="location-map-btn" type="button" id="catalog-location-map-btn" aria-label="Elegir ubicacion en el mapa" title="Elegir en el mapa">
+                <i class="fa-solid fa-map-location-dot"></i>
+              </button>
+            </span>
+          </label>
+          <label class="desktop-filter-only">
+            <span>Distancia maxima</span>
+            <input id="distance-filter" type="number" min="1" step="1" inputmode="numeric" placeholder="km">
+          </label>
+          <label class="desktop-filter-only">
+            <span>Precio maximo</span>
+            <input id="price-filter" type="number" min="1" step="1" inputmode="numeric" placeholder="$">
+          </label>
+          <label class="desktop-filter-only">
+            <span>Marca</span>
+            <input id="brand-filter" type="search" placeholder="John Deere, Case...">
+          </label>
+          <label class="desktop-filter-only">
+            <span>Potencia minima</span>
+            <input id="power-filter" type="number" min="1" step="1" inputmode="numeric" placeholder="HP">
+          </label>
         </div>
         <div>
           <div class="filter-label">Maquina</div>
           <div class="filters" id="category-filters" aria-label="Maquina"></div>
         </div>
-        <label class="inline-check filter-today-check">
-          <input id="today-filter" type="checkbox">
-          <span>Solo disponibles hoy</span>
-        </label>
+        <div class="form-actions">
+          <button class="btn ghost" type="button" id="catalog-filters-clear"><i class="fa-solid fa-rotate-left"></i> Limpiar filtros</button>
+        </div>
       </div>
-      <div class="form-actions">
-        <button class="btn ghost" type="button" id="catalog-filters-clear"><i class="fa-solid fa-rotate-left"></i> Limpiar filtros</button>
-        <button class="btn primary" type="button" id="catalog-filters-apply"><span class="btn-label"><i class="fa-solid fa-check"></i> Actualizar filtros</span></button>
       </div>
     </div>
+  </div>
+
+  <div class="modal-backdrop machine-detail-backdrop" id="machine-detail-modal" hidden>
+    <aside class="machine-detail-panel" role="dialog" aria-modal="true" aria-labelledby="machine-detail-title">
+      <button class="icon-btn machine-detail-close" type="button" id="machine-detail-close" aria-label="Cerrar detalle">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+      <div id="machine-detail-content"></div>
+    </aside>
   </div>
   <!-- MODAL SOLICITAR RESERVA -->
   <div class="modal-backdrop" id="request-modal" hidden>
