@@ -228,7 +228,8 @@ const seedPricingCorrections = {
   "m-embolsadora-richiger": { oldPrice: 18, price: 7500, priceUnit: "tonelada" },
 };
 
-const operationFlow = [
+const operationWorkflows = {
+  transport: [
   { key: "accepted", label: "Solicitud aceptada", action: "Salir hacia el origen", icon: "fa-circle-check", notify: "La solicitud fue aceptada." },
   { key: "on_way_origin", label: "En camino al origen", action: "Llegue al origen", icon: "fa-route", notify: "El contratista salio hacia el origen." },
   { key: "arrived_origin", label: "Llego al origen", action: "Comenzar carga", icon: "fa-location-dot", notify: "El contratista llego al origen." },
@@ -239,7 +240,42 @@ const operationFlow = [
   { key: "unloading", label: "Descargando", action: "Descarga finalizada", icon: "fa-dolly", notify: "Comenzo la descarga." },
   { key: "unloaded", label: "Descarga finalizada", action: "Finalizar trabajo", icon: "fa-flag-checkered", notify: "Finalizo la descarga." },
   { key: "done", label: "Trabajo finalizado", action: "", icon: "fa-circle-check", notify: "El trabajo fue finalizado." },
-];
+  ],
+  harvest: [
+    { key: "accepted", label: "Solicitud aceptada", action: "Salir al lote", icon: "fa-circle-check", notify: "La solicitud fue aceptada." },
+    { key: "on_way_field", label: "En camino al lote", action: "Llegue al lote", icon: "fa-route", notify: "El contratista esta en camino al lote." },
+    { key: "arrived_field", label: "En el lote", action: "Iniciar cosecha", icon: "fa-location-dot", notify: "El contratista llego al lote." },
+    { key: "harvesting", label: "Cosechando", action: "Cerrar labor", icon: "fa-wheat-awn", notify: "La cosecha esta en curso." },
+    { key: "wrapping_up", label: "Cierre de labor", action: "Finalizar trabajo", icon: "fa-clipboard-check", notify: "El contratista esta cerrando la labor." },
+    { key: "done", label: "Trabajo finalizado", action: "", icon: "fa-circle-check", notify: "El trabajo fue finalizado." },
+  ],
+  planting: [
+    { key: "accepted", label: "Solicitud aceptada", action: "Salir al lote", icon: "fa-circle-check", notify: "La solicitud fue aceptada." },
+    { key: "on_way_field", label: "En camino al lote", action: "Llegue al lote", icon: "fa-route", notify: "El contratista esta en camino al lote." },
+    { key: "setup", label: "Preparando equipo", action: "Iniciar siembra", icon: "fa-screwdriver-wrench", notify: "El equipo se esta preparando en el lote." },
+    { key: "planting", label: "Sembrando", action: "Cerrar labor", icon: "fa-seedling", notify: "La siembra esta en curso." },
+    { key: "wrapping_up", label: "Cierre de labor", action: "Finalizar trabajo", icon: "fa-clipboard-check", notify: "El contratista esta cerrando la labor." },
+    { key: "done", label: "Trabajo finalizado", action: "", icon: "fa-circle-check", notify: "El trabajo fue finalizado." },
+  ],
+  spraying: [
+    { key: "accepted", label: "Solicitud aceptada", action: "Salir al lote", icon: "fa-circle-check", notify: "La solicitud fue aceptada." },
+    { key: "on_way_field", label: "En camino al lote", action: "Llegue al lote", icon: "fa-route", notify: "El contratista esta en camino al lote." },
+    { key: "mixing", label: "Preparando aplicacion", action: "Iniciar aplicacion", icon: "fa-flask", notify: "El contratista esta preparando la aplicacion." },
+    { key: "spraying", label: "Aplicando", action: "Cerrar labor", icon: "fa-spray-can-sparkles", notify: "La aplicacion esta en curso." },
+    { key: "wrapping_up", label: "Cierre de labor", action: "Finalizar trabajo", icon: "fa-clipboard-check", notify: "El contratista esta cerrando la labor." },
+    { key: "done", label: "Trabajo finalizado", action: "", icon: "fa-circle-check", notify: "El trabajo fue finalizado." },
+  ],
+  generic: [
+    { key: "accepted", label: "Solicitud aceptada", action: "Salir al trabajo", icon: "fa-circle-check", notify: "La solicitud fue aceptada." },
+    { key: "on_way_field", label: "En camino", action: "Llegue al lugar", icon: "fa-route", notify: "El contratista esta en camino." },
+    { key: "arrived_field", label: "En el lugar", action: "Iniciar trabajo", icon: "fa-location-dot", notify: "El contratista llego al lugar de trabajo." },
+    { key: "working_field", label: "Trabajo en curso", action: "Cerrar labor", icon: "fa-tractor", notify: "El trabajo esta en curso." },
+    { key: "wrapping_up", label: "Cierre de labor", action: "Finalizar trabajo", icon: "fa-clipboard-check", notify: "El contratista esta cerrando la labor." },
+    { key: "done", label: "Trabajo finalizado", action: "", icon: "fa-circle-check", notify: "El trabajo fue finalizado." },
+  ],
+};
+
+const operationFlow = operationWorkflows.transport;
 
 const operationIncidents = ["Voy con demora", "Ruta cortada", "Problema mecanico", "Clima adverso", "Otro inconveniente"];
 
@@ -1984,6 +2020,18 @@ function bindOffersListActions() {
       advanceOperationState(button.dataset.reservationId);
       return;
     }
+    if (button.matches(".operation-prev-btn")) {
+      retreatOperationState(button.dataset.reservationId);
+      return;
+    }
+    if (button.matches(".compact-timeline-point[data-operation-state]")) {
+      applyOperationState(button.dataset.reservationId, button.dataset.operationState);
+      return;
+    }
+    if (button.matches(".open-review-btn")) {
+      openReviewModal(button.dataset.reservationId, button.dataset.reviewerRole);
+      return;
+    }
     if (button.matches(".open-operation-sheet-btn")) {
       openOperationSheet(button.dataset.reservationId);
       return;
@@ -2055,7 +2103,10 @@ function renderMisOfertas() {
   const inactivas  = myMachines.filter((m) => m.offerStatus === "inactive");
 
   // Solicitudes = reservations pending (that can be resolved as contractor)
-  const solicitudes = state.reservations.filter((reservation) => activeUserOwnsReservationMachine(reservation) && isContractorNegotiationStatus(reservation));
+  const solicitudes = state.reservations.filter((reservation) => (
+    activeUserOwnsReservationMachine(reservation)
+    && (isContractorNegotiationStatus(reservation) || contractorCanReviewProducer(reservation))
+  ));
 
   $("#tab-count-activas").textContent    = activas.length;
   $("#tab-count-pausadas").textContent   = pausadas.length;
@@ -2162,6 +2213,22 @@ function solicitudCard(reservation) {
       ${contractorOperationPanel(reservation)}
       ${rescheduleSection(reservation, "contractor")}
       ${contractorScheduleActions(reservation)}
+      ${contractorReviewActions(reservation)}
+    </div>
+  `;
+}
+
+function contractorCanReviewProducer(reservation) {
+  return reservation.status === "done" && !reviewForReservation(reservation.id, "contractor");
+}
+
+function contractorReviewActions(reservation) {
+  if (!contractorCanReviewProducer(reservation)) return "";
+  return `
+    <div class="reservation-actions">
+      <button class="btn ghost open-review-btn" type="button" data-reservation-id="${reservation.id}" data-reviewer-role="contractor">
+        <i class="fa-regular fa-star"></i> Evaluar productor
+      </button>
     </div>
   `;
 }
@@ -2169,7 +2236,8 @@ function solicitudCard(reservation) {
 function contractorOperationPanel(reservation) {
   if (!operationVisibleForReservation(reservation)) return "";
   const current = currentOperationState(reservation);
-  const next = nextOperationState(current.key);
+  const previous = previousOperationState(current.key, reservation);
+  const next = nextOperationState(current.key, reservation);
   const incidents = operationIncidentsMarkup(reservation);
   const locationNote = reservation.locationSharingActive
     ? `<p class="operation-location-note"><i class="fa-solid fa-location-crosshairs"></i> Ubicacion compartida durante esta contratacion.</p>`
@@ -2188,6 +2256,9 @@ function contractorOperationPanel(reservation) {
       </div>
       ${operationTimeline(reservation)}
       <div class="operation-actions">
+        <button class="btn ghost operation-prev-btn" type="button" data-reservation-id="${reservation.id}" ${previous ? "" : "disabled"}>
+          <i class="fa-solid fa-arrow-left"></i> ${previous ? escapeHTML(previous.label) : "Inicio"}
+        </button>
         ${next ? `<button class="btn primary operation-next-btn" type="button" data-reservation-id="${reservation.id}"><i class="fa-solid ${next.icon}"></i> ${escapeHTML(next.action || next.label)}</button>` : `<button class="btn primary" type="button" disabled><i class="fa-solid fa-check"></i> Trabajo finalizado</button>`}
         <button class="btn ghost open-operation-sheet-btn" type="button" data-reservation-id="${reservation.id}"><i class="fa-solid fa-sliders"></i> Actualizar estado</button>
       </div>
@@ -2202,34 +2273,126 @@ function operationVisibleForReservation(reservation) {
 }
 
 function currentOperationState(reservation) {
-  const key = reservation?.operationStatus || (reservation?.status === "done" ? "done" : reservation?.status === "working" ? "on_way_origin" : "accepted");
-  return operationStateByKey(key) || operationFlow[0];
+  const workflow = operationWorkflowForReservation(reservation);
+  const fallbackKey = reservation?.status === "done"
+    ? "done"
+    : reservation?.status === "working"
+      ? workflow[1]?.key || "accepted"
+      : "accepted";
+  const key = reservation?.operationStatus || fallbackKey;
+  return operationStateByKey(key, workflow) || workflow[0];
 }
 
-function operationStateByKey(key) {
-  return operationFlow.find((item) => item.key === key);
+function operationWorkflowForReservation(reservation) {
+  const category = reservation?.category || findMachine(reservation?.machineId)?.category || "";
+  if (reservation?.requestMode === "truck" || category === "Camion" || category === "Acoplado" || category === "Tolva") return operationWorkflows.transport;
+  if (reservation?.requestMode === "harvest" || category === "Cosechadora") return operationWorkflows.harvest;
+  if (category === "Sembradora") return operationWorkflows.planting;
+  if (category === "Pulverizadora" || category === "Dron") return operationWorkflows.spraying;
+  return operationWorkflows.generic;
 }
 
-function nextOperationState(key) {
-  const index = operationFlow.findIndex((item) => item.key === key);
-  if (index < 0 || index >= operationFlow.length - 1) return null;
-  return operationFlow[index + 1];
+function operationStateByKey(key, workflow = operationFlow) {
+  return workflow.find((item) => item.key === key);
+}
+
+function nextOperationState(key, reservation = null) {
+  const workflow = operationWorkflowForReservation(reservation);
+  const index = workflow.findIndex((item) => item.key === key);
+  if (index < 0 || index >= workflow.length - 1) return null;
+  return workflow[index + 1];
+}
+
+function previousOperationState(key, reservation = null) {
+  const workflow = operationWorkflowForReservation(reservation);
+  const index = workflow.findIndex((item) => item.key === key);
+  if (index <= 0) return null;
+  return workflow[index - 1];
 }
 
 function operationTimeline(reservation) {
+  const workflow = operationWorkflowForReservation(reservation);
   const currentKey = currentOperationState(reservation).key;
-  const currentIndex = Math.max(0, operationFlow.findIndex((item) => item.key === currentKey));
+  const currentIndex = Math.max(0, workflow.findIndex((item) => item.key === currentKey));
+  return compactTimelineMarkup(workflow, currentIndex, {
+    className: "operation-track",
+    interactive: true,
+    reservationId: reservation.id,
+    timeForStep: (step) => operationEventTime(reservation, step.key),
+  });
+}
+
+function compactTimelineMarkup(steps, currentIndex, options = {}) {
+  const safeSteps = steps.length ? steps : [{ key: "empty", label: "Sin estado", icon: "fa-circle" }];
+  const safeIndex = Math.min(Math.max(Number(currentIndex) || 0, 0), safeSteps.length - 1);
+  const current = safeSteps[safeIndex];
+  const currentTime = options.timeForStep ? options.timeForStep(current) : "";
+  const stepMarkup = safeSteps.map((step, index) => {
+    const distance = Math.abs(index - safeIndex);
+    const size = timelineDotSize(distance);
+    const opacity = timelineDotOpacity(distance);
+    const stateClass = index === safeIndex ? "current" : index < safeIndex ? "done" : "upcoming";
+    const time = options.timeForStep ? options.timeForStep(step) : "";
+    const tooltip = time ? `${step.label} - ${time}` : step.label;
+    const attrs = [
+      `class="compact-timeline-point ${stateClass}"`,
+      `style="--dot-size:${size}px;--point-opacity:${opacity}"`,
+      `aria-label="${escapeHTML(tooltip)}"`,
+      `data-tooltip="${escapeHTML(tooltip)}"`,
+    ];
+    if (index === safeIndex) attrs.push('aria-current="step"');
+    if (options.interactive) {
+      attrs.push(`type="button" data-reservation-id="${escapeHTML(options.reservationId)}" data-operation-state="${escapeHTML(step.key)}"`);
+      return `
+        <button ${attrs.join(" ")}>
+          <span class="compact-timeline-dot"><i class="fa-solid ${escapeHTML(step.icon || "fa-circle")}"></i></span>
+        </button>
+        ${index < safeSteps.length - 1 ? compactTimelineSegmentMarkup(index, safeIndex) : ""}
+      `;
+    }
+    attrs.push("tabindex=\"0\"");
+    return `
+      <span ${attrs.join(" ")}>
+        <span class="compact-timeline-dot"><i class="fa-solid ${escapeHTML(step.icon || "fa-circle")}"></i></span>
+      </span>
+      ${index < safeSteps.length - 1 ? compactTimelineSegmentMarkup(index, safeIndex) : ""}
+    `;
+  }).join("");
+
   return `
-    <div class="status-track operation-track" aria-label="Progreso operativo">
-      ${operationFlow.map((step, i) => `
-        <span class="status-track-step ${i <= currentIndex ? "done" : ""} ${i === currentIndex ? "current" : ""}">
-          <span class="status-track-dot">${i < currentIndex ? '<i class="fa-solid fa-check"></i>' : ""}</span>
-          <span class="status-track-label">${escapeHTML(step.label)}</span>
-          <span class="status-track-time">${operationEventTime(reservation, step.key)}</span>
-        </span>
-      `).join("")}
-    </div>
+    <section class="compact-timeline ${options.className || ""}" aria-label="Estado actual">
+      <div class="compact-timeline-current">
+        <span>Estado actual</span>
+        <strong>${escapeHTML(current.label)}</strong>
+        ${currentTime ? `<small>${escapeHTML(currentTime)}</small>` : ""}
+      </div>
+      <div class="compact-timeline-track">
+        ${stepMarkup}
+      </div>
+    </section>
   `;
+}
+
+function compactTimelineSegmentMarkup(index, currentIndex) {
+  const distance = Math.min(Math.abs(index - currentIndex), Math.abs(index + 1 - currentIndex));
+  const size = distance === 0 ? 4 : distance === 1 ? 3 : 2;
+  const opacity = distance === 0 ? 1 : distance === 1 ? 0.68 : 0.32;
+  const stateClass = index < currentIndex ? "done" : "upcoming";
+  return `<span class="compact-timeline-segment ${stateClass}" style="--segment-size:${size}px;--segment-opacity:${opacity}"></span>`;
+}
+
+function timelineDotSize(distance) {
+  if (distance === 0) return 26;
+  if (distance === 1) return 14;
+  if (distance === 2) return 10;
+  return 7;
+}
+
+function timelineDotOpacity(distance) {
+  if (distance === 0) return 1;
+  if (distance === 1) return 0.82;
+  if (distance === 2) return 0.55;
+  return 0.34;
 }
 
 function operationEventTime(reservation, key) {
@@ -2257,14 +2420,22 @@ function operationIncidentsMarkup(reservation) {
 function advanceOperationState(reservationId) {
   const reservation = state.reservations.find((item) => item.id === reservationId);
   if (!reservation) return;
-  const next = nextOperationState(currentOperationState(reservation).key);
+  const next = nextOperationState(currentOperationState(reservation).key, reservation);
   if (!next) return;
   applyOperationState(reservationId, next.key);
 }
 
+function retreatOperationState(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  const previous = previousOperationState(currentOperationState(reservation).key, reservation);
+  if (!previous) return;
+  applyOperationState(reservationId, previous.key);
+}
+
 function applyOperationState(reservationId, operationKey) {
   const reservation = state.reservations.find((item) => item.id === reservationId);
-  const next = operationStateByKey(operationKey);
+  const next = operationStateByKey(operationKey, operationWorkflowForReservation(reservation));
   if (!reservation || !next) return;
   const previous = JSON.parse(JSON.stringify(reservation));
   const now = new Date().toISOString();
@@ -2388,7 +2559,8 @@ function closeOperationSheet() {
 
 function renderOperationSheet(reservation) {
   const currentKey = currentOperationState(reservation).key;
-  $("#operation-state-list").innerHTML = operationFlow.map((item) => `
+  const workflow = operationWorkflowForReservation(reservation);
+  $("#operation-state-list").innerHTML = workflow.map((item) => `
     <button class="btn ${item.key === currentKey ? "primary" : "ghost"} operation-state-choice" type="button" data-operation-state="${item.key}">
       <i class="fa-solid ${item.icon}"></i> ${escapeHTML(item.label)}
     </button>
@@ -2857,7 +3029,6 @@ function reservationCard(reservation) {
   const canFinishWork = reservation.status === "working" && !sentByActiveUser;
   const canDeleteFinished = ["done", "rejected", "cancelled"].includes(reservation.status);
   const canReviewContractor = reservation.status === "done" && !reviewForReservation(reservation.id, "producer");
-  const canReviewProducer = reservation.status === "done" && !reviewForReservation(reservation.id, "contractor");
   const canRespondScheduleCounter = reservation.status === "schedule_counter" && sentByActiveUser;
   const canRequestReschedule = ["accepted", "working"].includes(reservation.status) && !pendingRescheduleFor(reservation.id);
   const canReportDelay = ["accepted", "working"].includes(reservation.status) && !sentByActiveUser;
@@ -2865,7 +3036,7 @@ function reservationCard(reservation) {
   const icon = categoryIcons[reservation.category] || categoryIcons[machine?.category] || "fa-tractor";
   const requestCode = reservationCode(reservation);
   const equipmentMarkup = reservationEquipmentMarkup(reservation, machine);
-  const actionsMarkup = reservationActionsMarkup(reservation, { canResolve, canStartWork, canFinishWork, canDeleteFinished, canRequestReschedule, canReportDelay, canRespondScheduleCounter, canReviewContractor, canReviewProducer });
+  const actionsMarkup = reservationActionsMarkup(reservation, { canResolve, canStartWork, canFinishWork, canDeleteFinished, canRequestReschedule, canReportDelay, canRespondScheduleCounter, canReviewContractor });
   const statusLabel = reservationStatusLabelForCurrentUser(reservation, sentByActiveUser);
 
   return `
@@ -2975,13 +3146,6 @@ function reservationActionsMarkup(reservation, flags) {
     actions.push(`
       <button class="btn ghost open-review-btn" type="button" data-reservation-id="${reservation.id}" data-reviewer-role="producer">
         <i class="fa-solid fa-star"></i> Evaluar contratista
-      </button>
-    `);
-  }
-  if (flags.canReviewProducer) {
-    actions.push(`
-      <button class="btn ghost open-review-btn" type="button" data-reservation-id="${reservation.id}" data-reviewer-role="contractor">
-        <i class="fa-regular fa-star"></i> Evaluar productor
       </button>
     `);
   }
@@ -3177,30 +3341,35 @@ function reservationStatusTrack(reservation) {
   if (status === "cancelled") return `<p class="reservation-rejected"><i class="fa-solid fa-ban"></i> Solicitud cancelada</p>`;
   if (status === "schedule_counter") return `<p class="reservation-rejected neutral"><i class="fa-regular fa-clock"></i> Esperando respuesta del productor</p>`;
   if (status === "original_kept") return `<p class="reservation-rejected neutral"><i class="fa-regular fa-clock"></i> El productor mantuvo el horario original</p>`;
-  const steps = [
-    { key: "pending",  label: "Solicitada" },
-    { key: "accepted", label: "Aceptada" },
-    { key: "dispatch", label: "Sali&oacute; del taller" },
-    { key: "arrival",  label: "Lleg&oacute; al lote" },
-    { key: "working",  label: "En curso" },
-    { key: "done",     label: "Finalizada" },
-  ];
+  const steps = reservationWorkflowSteps(reservation);
   const currentIndex = reservationStepIndex(status);
-  return `
-    <div class="status-track" aria-label="Progreso de la reserva">
-      ${steps.map((step, i) => `
-        <span class="status-track-step ${i <= currentIndex ? "done" : ""} ${i === currentIndex ? "current" : ""}">
-          <span class="status-track-dot">${i < currentIndex ? '<i class="fa-solid fa-check"></i>' : ""}</span>
-          <span class="status-track-label">${step.label}</span>
-          <span class="status-track-time">${timelineStamp(step.key, reservation)}</span>
-        </span>
-      `).join("")}
-    </div>
-  `;
+  return compactTimelineMarkup(steps, currentIndex, {
+    className: "reservation-track",
+    timeForStep: (step) => timelineStamp(step.key, reservation),
+  });
+}
+
+function reservationWorkflowSteps(reservation) {
+  const category = reservation?.category || findMachine(reservation?.machineId)?.category || "";
+  const workLabel = reservation?.requestMode === "truck" || category === "Camion"
+    ? "En viaje"
+    : category === "Cosechadora"
+      ? "Cosechando"
+      : category === "Sembradora"
+        ? "Sembrando"
+        : category === "Pulverizadora" || category === "Dron"
+          ? "Aplicando"
+          : "En curso";
+  return [
+    { key: "pending", label: "Solicitada", icon: "fa-paper-plane" },
+    { key: "accepted", label: "Aceptada", icon: "fa-circle-check" },
+    { key: "working", label: workLabel, icon: categoryIcons[category] || "fa-tractor" },
+    { key: "done", label: "Finalizada", icon: "fa-flag-checkered" },
+  ];
 }
 
 function reservationStepIndex(status) {
-  const map = { pending: 0, accepted: 1, working: 4, done: 5 };
+  const map = { pending: 0, accepted: 1, working: 2, done: 3 };
   return map[status] ?? 0;
 }
 
