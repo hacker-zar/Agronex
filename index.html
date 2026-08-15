@@ -666,7 +666,11 @@
         </button>
       </div>
       <input type="hidden" name="machineId">
-      <div class="form-grid">
+      <div class="request-progress" aria-label="Progreso de la solicitud">
+        <span class="request-progress-label" id="request-progress-label">Paso 1 de 4 · Cuándo lo necesitás</span>
+        <div class="request-progress-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="form-grid" data-request-step="1">
         <label class="request-date-field">
           <span id="request-date-label">Inicio estimado</span>
           <input name="date" type="date" required>
@@ -683,6 +687,8 @@
           <span>Fecha limite (opcional)</span>
           <input name="dateEnd" type="date" placeholder="Flexible">
         </label>
+      </div>
+      <div class="form-grid" data-request-step="2">
         <label id="request-crop-field" hidden>
           <span>Cultivo</span>
           <input name="crop" maxlength="60" placeholder="Ej: Soja, maiz, trigo">
@@ -709,8 +715,9 @@
           <input name="estimatedTrips" type="number" min="1" max="1000" step="1" inputmode="numeric" placeholder="3">
         </label>
         <label id="request-km-field" hidden>
-          <span>Kilometros estimados</span>
-          <input name="estimatedKm" type="number" min="1" max="10000" step="0.1" inputmode="decimal" placeholder="48.3">
+          <span id="request-km-label">Kilometros estimados</span>
+          <input name="estimatedKm" type="number" min="1" max="10000" step="0.1" inputmode="decimal" placeholder="Se calcula al elegir origen y destino">
+          <small class="field-helper" id="request-km-help" hidden></small>
         </label>
         <label id="request-hours-field" hidden>
           <span>Horas estimadas</span>
@@ -730,7 +737,7 @@
           </select>
         </label>
       </div>
-      <div class="form-grid" id="request-transport-fields" hidden>
+      <div class="form-grid" id="request-transport-fields" data-request-step="2" hidden>
         <label>
           <span>Origen</span>
           <div class="transport-location-field">
@@ -762,7 +769,7 @@
           <input name="cargoType" maxlength="80" placeholder="Ej: Maiz, soja, fertilizante">
         </label>
       </div>
-      <label class="full-field" id="request-job-field">
+      <label class="full-field" id="request-job-field" data-request-step="2">
         <span>Trabajo solicitado</span>
         <select name="job" required>
           <option value="">Seleccionar trabajo</option>
@@ -776,19 +783,19 @@
           <option value="Otros">Otros</option>
         </select>
       </label>
-      <label class="full-field conditional-field" id="job-other-field" hidden>
+      <label class="full-field conditional-field" id="job-other-field" data-request-step="2" hidden>
         <span>Detalle del trabajo</span>
         <input name="jobOther" maxlength="80" placeholder="Ej: Enfardado, embolsado">
       </label>
-      <label class="full-field" id="request-notes-field">
+      <label class="full-field" id="request-notes-field" data-request-step="3">
         <span>Observaciones</span>
         <textarea name="notes" rows="3" maxlength="260" placeholder="Ej.: Acceso por camino de tierra, transportar maiz al silo, ingresar por porton norte..."></textarea>
       </label>
-      <label class="full-field" id="request-access-field">
+      <label class="full-field" id="request-access-field" data-request-step="3">
         <span>Condiciones de acceso</span>
         <textarea name="accessConditions" rows="2" maxlength="220" placeholder="Ej.: Asfalto hasta el campo, 8 km de ripio, apto para camiones..."></textarea>
       </label>
-      <label class="full-field" id="request-location-field">
+      <label class="full-field" id="request-location-field" data-request-step="3">
         <span id="request-location-label">Ubicacion del lote</span>
         <button class="location-select-btn" type="button" id="request-location-picker">
           <i class="fa-solid fa-location-dot"></i>
@@ -799,7 +806,7 @@
         <input name="locationLatitude" type="hidden">
         <input name="locationLongitude" type="hidden">
       </label>
-      <section class="economic-summary" id="request-economic-summary" aria-live="polite">
+      <section class="economic-summary" id="request-economic-summary" data-request-step="4" aria-live="polite">
         <div class="economic-summary-head">
           <span><i class="fa-solid fa-coins"></i> Estimacion economica</span>
           <strong id="request-estimated-total">Sin datos suficientes</strong>
@@ -814,14 +821,30 @@
         <option value="Estancia El Ombu / Venado Tuerto / General Lopez"></option>
         <option value="Campo San Miguel / Junin / Buenos Aires"></option>
       </datalist>
+      <section class="request-review" data-request-step="4" id="request-review" aria-live="polite"></section>
       <p class="form-error" id="request-error" role="alert" hidden></p>
       <div class="form-actions">
         <button class="btn ghost" type="button" id="request-cancel">Cancelar</button>
+        <button class="btn ghost" type="button" id="request-back" hidden>Volver</button>
+        <button class="btn primary" type="button" id="request-next">Continuar</button>
         <button class="btn primary" type="submit" id="request-submit">
-          <span class="btn-label">Solicitar reserva</span>
+          <span class="btn-label">Confirmar solicitud</span>
         </button>
       </div>
     </form>
+  </div>
+
+  <div class="modal-backdrop" id="payment-demo-modal" hidden>
+    <section class="modal payment-demo-modal" role="dialog" aria-modal="true" aria-labelledby="payment-demo-title">
+      <div class="payment-demo-icon"><i class="fa-solid fa-check"></i></div>
+      <h2 id="payment-demo-title">Pago confirmado</h2>
+      <p class="payment-demo-message" id="payment-demo-message">Tu pago fue autorizado correctamente.</p>
+      <div class="payment-demo-total"><span>Total autorizado</span><strong id="payment-demo-total">—</strong></div>
+      <div class="payment-confirmation-card"><i class="fa-solid fa-clipboard-check"></i><div><strong>Solicitud confirmada</strong><p>El contratista recibió la confirmación y podrá comenzar a coordinar el servicio.</p></div></div>
+      <div class="payment-confirmation-card payment-protected-card"><i class="fa-solid fa-lock"></i><div><strong>Pago protegido</strong><p>El dinero queda retenido hasta que el servicio sea completado.</p></div></div>
+      <div class="form-actions"><button class="btn primary" type="button" id="payment-demo-close">Ver mi reserva</button></div>
+      <p class="payment-demo-note">Simulación para demostración. No se realizó ningún cobro.</p>
+    </section>
   </div>
 
   <!-- MODAL SELECTOR DE UBICACION -->

@@ -1003,6 +1003,7 @@ function bindForms() {
   requestForm.addEventListener("submit", (e) => {
     e.preventDefault();
     const formEl = e.currentTarget;
+    if (Number(formEl.dataset.requestStep || 1) !== 4) return;
     const validation = validateRequestForm(formEl);
     if (!validation.valid) {
       showRequestError(validation.message);
@@ -1023,6 +1024,7 @@ function bindForms() {
       emitAppEvent("job.created", { reservation, machine });
       setButtonLoading(submitBtn, false);
       closeRequestModal();
+      openPaymentDemo(reservation);
       updateBadges();
       state.offersTab = "solicitudes";
       showToast("Solicitud enviada. La abrimos en Solicitudes para que puedas probar el flujo.");
@@ -1051,6 +1053,15 @@ function bindForms() {
 
   $("#request-close").addEventListener("click", closeRequestModal);
   $("#request-cancel").addEventListener("click", closeRequestModal);
+  $("#request-next").addEventListener("click", () => advanceRequestStep(requestForm));
+  $("#request-back").addEventListener("click", () => setRequestStep(requestForm, Number(requestForm.dataset.requestStep || 1) - 1));
+  $("#payment-demo-close").addEventListener("click", () => {
+    const modal = $("#payment-demo-modal");
+    const reservationId = modal.dataset.reservationId;
+    modal.hidden = true;
+    showScreen("reservas");
+    setTimeout(() => document.querySelector(`[data-reservation-id="${reservationId}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+  });
   $("#request-modal").addEventListener("click", (e) => {
     if (e.target.id === "request-modal") closeRequestModal();
   });
@@ -2102,13 +2113,12 @@ function machineCard(machine) {
   const availabilityStatus = slot ? availabilitySlotStatusLabel(slot.status) : "Ventana flexible";
   const slotUnavailable = slot?.status === "unavailable";
   const availabilityClass = availableToday ? "available-today" : (availableTomorrow ? "available-tomorrow" : "");
-  const availabilityBadge = availabilityBadgeMarkup(machine, slot, availabilityLabel);
+  const catalogBadgeClass = machine.badge === "Nuevo" ? "catalog-badge-new" : machine.badge === "Respuesta rápida" ? "catalog-badge-fast" : "";
   return `
     <article class="machine-card ${availabilityClass}" data-machine-id="${escapeHTML(machine.id)}">
       <div class="machine-media">
         <i class="fa-solid ${categoryIcons[machine.category] || "fa-tractor"}"></i>
         ${machine.badge ? `<span class="machine-badge">${escapeHTML(machine.badge)}</span>` : ""}
-        ${availabilityBadge}
         <button class="floating-action report-btn" type="button" aria-label="Denunciar publicación" title="Denunciar" data-machine-id="${escapeHTML(machine.id)}">
           <i class="fa-solid fa-flag"></i>
         </button>
@@ -2214,7 +2224,7 @@ function machineDetailMarkup(machine) {
     <div class="machine-detail-hero">
       <div class="machine-detail-media">
         <i class="fa-solid ${categoryIcons[machine.category] || "fa-tractor"}"></i>
-        ${machine.badge ? `<span class="machine-badge">${escapeHTML(machine.badge)}</span>` : ""}
+        ${machine.badge ? `<span class="machine-badge ${catalogBadgeClass}">${escapeHTML(machine.badge)}</span>` : ""}
       </div>
       <div class="machine-detail-summary">
         <span class="category-pill">${escapeHTML(machine.category)}</span>
@@ -2460,6 +2470,9 @@ function offerCard(machine, tab) {
   const slot = availabilitySlotForMachine(machine);
   const slotStatus = slot ? availabilitySlotStatusLabel(slot.status) : "Sin ventana flexible";
   const slotStatusClass = slot ? availabilitySlotStatusClass(slot.status) : "status-paused";
+  const offerBorderClass = machine.offerStatus === "paused"
+    ? "offer-card--paused"
+    : isAvailableToday(machine) ? "offer-card--available-today" : "";
 
   const actions = tab === "activas" ? `
     ${solicitudesPendientes > 0 ? `<button class="btn btn-sm warning" disabled><i class="fa-solid fa-inbox"></i> ${solicitudesPendientes} pendiente${solicitudesPendientes > 1 ? "s" : ""}</button>` : ""}
@@ -2476,7 +2489,7 @@ function offerCard(machine, tab) {
   `;
 
   return `
-    <div class="offer-card">
+    <div class="offer-card ${offerBorderClass}">
       <div class="offer-icon">
         <i class="fa-solid ${icon}"></i>
       </div>
@@ -2499,6 +2512,7 @@ function offerCard(machine, tab) {
 }
 
 function solicitudCard(reservation) {
+  const acceptedMark = reservation.status === "accepted" ? '<span class="accepted-request-mark" aria-label="Solicitud aceptada">✅</span>' : "";
   return `
     <div class="offer-solicitud-card">
       <div class="offer-solicitud-head">
@@ -2506,7 +2520,7 @@ function solicitudCard(reservation) {
           <div class="offer-solicitud-title">${escapeHTML(reservation.machineTitle)}</div>
           <div class="offer-solicitud-meta">Solicitud ${formatDate(reservation.createdAt)} - ID: ${reservationCode(reservation)}</div>
         </div>
-        <span class="status-pill status-${reservation.status}">${escapeHTML(statusLabels[reservation.status] || reservation.status)}</span>
+        <span class="status-pill status-${reservation.status}">${acceptedMark}${escapeHTML(statusLabels[reservation.status] || reservation.status)}</span>
       </div>
       ${solicitudLogisticsPanel(reservation)}
       ${scheduleNegotiationSection(reservation, "contractor")}
@@ -3657,7 +3671,7 @@ function reservationCard(reservation) {
   const statusLabel = reservationStatusLabelForCurrentUser(reservation, sentByActiveUser);
 
   return `
-    <article class="reservation-card">
+    <article class="reservation-card" data-reservation-id="${escapeHTML(reservation.id)}">
       <div class="reservation-head">
         <div class="reservation-title-wrap">
           <span class="reservation-machine-icon"><i class="fa-solid ${icon}"></i></span>
@@ -4101,7 +4115,7 @@ function timelineStamp(stepKey, reservation) {
   };
   const time = timeByStep[stepKey];
   if (!time && stepKey !== "done") return "";
-  return `<time>${formatDate(dateByStep[stepKey])}</time>${time ? `<strong>${time}</strong>` : ""}`;
+  return time ? `${formatDate(dateByStep[stepKey])} · ${time}` : formatDate(dateByStep[stepKey]);
 }
 function bindScheduleCounterModal() {
   const form = $("#schedule-counter-form");
@@ -4985,9 +4999,62 @@ function openRequestModal(machineId) {
   formControl(form, "dateEnd").min = formControl(form, "date").min;
   syncRequestDateRange(form);
   updateRequestEstimate(form);
+  setRequestStep(form, 1);
   $("#request-title").textContent = machine.title;
   $("#request-modal").hidden = false;
   formControl(form, "date").focus();
+}
+
+const requestStepLabels = ["Cuándo lo necesitás", "Datos del trabajo", "Ubicación y detalles", "Revisá y confirmá"];
+
+function setRequestStep(form, step) {
+  const nextStep = Math.min(4, Math.max(1, Number(step) || 1));
+  form.dataset.requestStep = nextStep;
+  form.querySelectorAll("[data-request-step]").forEach((element) => {
+    const belongsToStep = Number(element.dataset.requestStep) === nextStep;
+    const allowedByMode = element.dataset.modeVisible !== "false";
+    element.hidden = !belongsToStep || !allowedByMode;
+  });
+  $("#request-progress-label").textContent = `Paso ${nextStep} de 4 · ${requestStepLabels[nextStep - 1]}`;
+  $$("#request-form .request-progress-dots i").forEach((dot, index) => dot.classList.toggle("active", index < nextStep));
+  $("#request-back").hidden = nextStep === 1;
+  $("#request-next").hidden = nextStep === 4;
+  $("#request-submit").hidden = nextStep !== 4;
+  if (nextStep === 4) renderRequestReview(form);
+  hideRequestError();
+}
+
+function advanceRequestStep(form) {
+  const step = Number(form.dataset.requestStep || 1);
+  const fields = [...form.querySelectorAll(`[data-request-step="${step}"] input[required]:not([type="hidden"]), [data-request-step="${step}"] select[required]`)]
+    .filter((field) => !field.closest("[hidden]"));
+  const invalid = fields.find((field) => !clean(field.value));
+  if (invalid) {
+    showRequestError("Completá los datos requeridos para continuar.");
+    invalid.focus();
+    return;
+  }
+  setRequestStep(form, step + 1);
+}
+
+function renderRequestReview(form) {
+  const machine = findMachine(formControl(form, "machineId")?.value);
+  const location = getRequestLocation(form);
+  const isTruck = form.dataset.requestMode === "truck";
+  const place = isTruck
+    ? `${clean(formControl(form, "origin").value) || "Origen a confirmar"} → ${clean(formControl(form, "destination").value) || "Destino a confirmar"}`
+    : location?.address || "Ubicación a confirmar";
+  $("#request-review").innerHTML = `<h3>Resumen de la solicitud</h3><div><span>Servicio</span><strong>${escapeHTML(machine?.title || "Servicio")}</strong></div><div><span>Fecha y horario</span><strong>${escapeHTML(formatDateRange({ date: formControl(form, "date").value, startTime: formControl(form, "startTime").value, endTime: formControl(form, "endTime").value }))}</strong></div><div><span>Ubicación</span><strong>${escapeHTML(place)}</strong></div>`;
+}
+
+function openPaymentDemo(reservation) {
+  const context = reservationEconomicContext(reservation);
+  const total = formatEstimatedMoney(context?.estimate?.estimatedValue);
+  $("#payment-demo-total").textContent = total;
+  $("#payment-demo-message").textContent = `Tu pago de ${total} fue autorizado correctamente.`;
+  const modal = $("#payment-demo-modal");
+  modal.dataset.reservationId = reservation.id;
+  modal.hidden = false;
 }
 
 const requestServiceConfigs = {
@@ -5091,7 +5158,8 @@ function syncRequestMode(form, machine) {
   toggleField("#request-tons-field", (config.showTons && ["tonelada", "tonelada_kilometro"].includes(priceUnit)) || quantityFields.tons);
   toggleField("#request-bags-field", quantityFields.bags);
   toggleField("#request-trips-field", quantityFields.trips);
-  toggleField("#request-km-field", quantityFields.km);
+  // In transport requests the distance is derived from origin and destination, so it is not a user-facing field.
+  toggleField("#request-km-field", quantityFields.km && !config.showTransport);
   toggleField("#request-hours-field", quantityFields.hours);
   toggleField("#request-days-field", quantityFields.days);
   toggleField("#request-location-field", config.showLocation);
@@ -5100,6 +5168,13 @@ function syncRequestMode(form, machine) {
   $("#request-date-label").textContent = config.dateLabel;
   $("#request-location-label").textContent = config.locationLabel;
   $("#request-tons-label").textContent = config.tonsLabel;
+  const kmInput = formControl(form, "estimatedKm");
+  const kmHelp = $("#request-km-help");
+  $("#request-km-label").textContent = "Kilometros estimados";
+  kmInput.readOnly = config.showTransport;
+  kmInput.placeholder = config.showTransport ? "Se calcula al elegir origen y destino" : "48.3";
+  kmHelp.hidden = !config.showTransport;
+  kmHelp.textContent = config.showTransport ? "Se calcula automáticamente al marcar origen y destino en el mapa." : "";
 
   formControl(form, "job").value = defaultJobForMachine(machine);
   clearHiddenRequestFields(form, config);
@@ -5131,7 +5206,10 @@ function clearHiddenRequestFields(form, config) {
 
 function toggleField(selector, visible) {
   const el = $(selector);
-  if (el) el.hidden = !visible;
+  if (el) {
+    el.dataset.modeVisible = String(Boolean(visible));
+    el.hidden = !visible;
+  }
 }
 
 const requestPayloadBuilders = {
@@ -5454,11 +5532,10 @@ function locationRadiusInfoMarkup(location) {
   }
   return `
     <strong id="location-selected-address">${escapeHTML(location.address || "Ubicacion seleccionada")}</strong>
-    <div class="location-radius-card ${info.inside ? "inside" : "outside"}">
-      <span><i class="fa-solid fa-route"></i> Distancia: <strong>${info.distanceLabel}</strong></span>
-      <span><i class="fa-solid ${info.inside ? "fa-circle-check" : "fa-circle-exclamation"}"></i> ${info.statusLabel}</span>
-      ${info.inside ? "" : `<span>Radio configurado: <strong>${info.radiusLabel}</strong></span>`}
-      <span><i class="fa-regular fa-clock"></i> Tiempo estimado: <strong>${info.timeLabel}</strong></span>
+    <div class="location-radius-summary ${info.inside ? "inside" : "outside"}">
+      <span><i class="fa-solid fa-route"></i>${info.distanceLabel}</span>
+      <span class="location-radius-status"><i class="fa-solid ${info.inside ? "fa-circle-check" : "fa-circle-exclamation"}"></i>${info.inside ? "Dentro del radio" : `Fuera del radio (${info.radiusLabel})`}</span>
+      <span><i class="fa-regular fa-clock"></i>${info.timeLabel}</span>
     </div>
   `;
 }
@@ -5700,9 +5777,11 @@ function resetRequestLocation(form) {
 function updateRequestLocationButton(address) {
   const button = $("#request-location-picker");
   const label = $("#request-location-text");
-  const hasAddress = Boolean(clean(address));
+  const normalizedAddress = clean(address);
+  const hasAddress = Boolean(normalizedAddress);
   button.classList.toggle("has-location", hasAddress);
-  label.textContent = hasAddress ? address : "Seleccionar ubicacion";
+  button.title = hasAddress ? `Ubicacion seleccionada: ${normalizedAddress}` : "Seleccionar ubicacion";
+  label.textContent = hasAddress ? normalizedAddress : "Seleccionar ubicacion";
 }
 
 function openCatalogLocationPicker() {
@@ -5768,6 +5847,7 @@ function setTransportLocation(form, target, location) {
   formControl(form, `${target}Latitude`).value = String(location.latitude);
   formControl(form, `${target}Longitude`).value = String(location.longitude);
   updateTransportLocationButton(target, address);
+  updateTransportDistance(form);
 }
 
 function clearTransportLocation(form, target) {
@@ -5775,6 +5855,7 @@ function clearTransportLocation(form, target) {
   formControl(form, `${target}Latitude`).value = "";
   formControl(form, `${target}Longitude`).value = "";
   updateTransportLocationButton(target, "");
+  updateTransportDistance(form);
 }
 
 function clearTransportCoordinates(form, target) {
@@ -5782,6 +5863,21 @@ function clearTransportCoordinates(form, target) {
   formControl(form, `${target}Latitude`).value = "";
   formControl(form, `${target}Longitude`).value = "";
   updateTransportLocationButton(target, "");
+  updateTransportDistance(form);
+}
+
+function updateTransportDistance(form) {
+  if (form?.dataset.requestMode !== "truck") return;
+  const kilometers = formControl(form, "estimatedKm");
+  const origin = getTransportLocation(form, "origin");
+  const destination = getTransportLocation(form, "destination");
+  if (!origin || !destination) {
+    kilometers.value = "";
+    return;
+  }
+  // The MVP has no routing provider yet. Apply a modest road-distance factor to the straight-line distance.
+  const estimatedRoadKm = Math.max(1, Math.round(haversineKm(origin, destination) * 1.2 * 10) / 10);
+  kilometers.value = String(estimatedRoadKm);
 }
 
 function getTransportLocation(form, target) {
