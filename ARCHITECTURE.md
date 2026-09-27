@@ -4,7 +4,7 @@
 
 Agronex es una plataforma modular para el agro. El prototipo actual implementa el primer modulo operativo: `NexuDrive`.
 
-El prototipo esta construido como frontend con Vite, HTML, CSS y JavaScript modular. La app actual funciona principalmente en el navegador, con persistencia local mediante `localStorage` y una integracion parcial/preparatoria con Supabase.
+El proyecto conserva la aplicacion NexuDrive en Vite, HTML, CSS y JavaScript modular. La app actual funciona principalmente en el navegador, con persistencia local mediante `localStorage` y una integracion parcial/preparatoria con Supabase. La landing publica de Agronex se compila como una segunda entrada Vite independiente, usando React, TypeScript, Tailwind CSS 4 y Lucide.
 
 El MVP actual esta orientado a validar el flujo de contratacion agropecuaria, especialmente camiones, sin convertir el producto en chat, red social o ERP.
 
@@ -31,6 +31,7 @@ Regla tecnica y de producto: no mezclar logicas de modulos futuros dentro de `Ne
 - Vite como servidor de desarrollo y build.
 - JavaScript ES Modules.
 - HTML y CSS sin framework frontend.
+- React/TypeScript y Tailwind CSS 4, aislados en `/landing`.
 - `localStorage` como almacenamiento principal del prototipo.
 - Supabase Auth y helpers de base de datos en integracion parcial.
 - Service Worker para notificaciones del navegador.
@@ -41,10 +42,15 @@ Regla tecnica y de producto: no mezclar logicas de modulos futuros dentro de `Ne
 - `npm run dev`: levanta Vite en modo desarrollo.
 - `npm run build`: genera build de produccion en `dist`.
 - `npm run preview`: previsualiza el build.
+- `npm run check:types`: valida los tipos de la landing.
 
 ## Estructura principal
 
 - `index.html`: markup principal de la aplicacion, modales y pantallas.
+- `landing/index.html`: entrada HTML de la landing publica.
+- `landing/`: componentes React/TypeScript y estilos de la landing; no carga el CSS ni el bootstrap de NexuDrive.
+- `vite.config.js`: plugins de React/Tailwind y build multi-entrada.
+- `/landing` se resuelve a `landing/index.html` en Vite dev y preview. En produccion, el hosting debe servir el `index.html` de ese directorio para `/landing` o aplicar la reescritura equivalente.
 - `styles.css`: estilos globales y responsive.
 - `js/app.js`: orquestador principal de estado, eventos, renderizado y flujos del modulo actual.
 - `js/modules/`: reglas y helpers separados por dominio.

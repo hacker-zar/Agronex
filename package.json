@@ -7,9 +7,21 @@
     "dev": "vite --host 0.0.0.0",
     "test": "node --test",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "check:types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.1.1",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3",
     "vite": "^7.2.7"
   }
 }
