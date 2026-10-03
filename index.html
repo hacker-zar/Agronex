@@ -109,12 +109,15 @@
     <section class="screen" id="screen-reservas" aria-labelledby="reservas-title">
       <div class="page-head compact">
         <div>
-          <p class="eyebrow">Flujo del MVP</p>
-          <h1 id="reservas-title">Mis Reservas</h1>
+          <p class="eyebrow">OPERACIONES</p>
+          <h1 id="reservas-title">¿Qué está pasando con mis trabajos?</h1>
         </div>
       </div>
 
-      <div class="flow-note" id="reservas-note"></div>
+      <div class="offers-tabs operation-filters" id="reservations-filters" role="tablist" aria-label="Filtrar operaciones">
+        <button class="offers-tab active" type="button" data-reservations-filter="in-progress" role="tab" aria-selected="true">En proceso <strong class="offers-tab-count" id="reservations-count-in-progress">0</strong></button>
+        <button class="offers-tab" type="button" data-reservations-filter="finished" role="tab" aria-selected="false">Finalizadas <strong class="offers-tab-count" id="reservations-count-finished">0</strong></button>
+      </div>
       <div class="reservations-list" id="reservations-list"></div>
       <div class="empty-state" id="reservations-empty" hidden>
         <i class="fa-regular fa-calendar"></i>
@@ -127,8 +130,8 @@
     <section class="screen" id="screen-mis-ofertas" aria-labelledby="mis-ofertas-title">
       <div class="page-head compact">
         <div>
-          <p class="eyebrow">Contratista</p>
-          <h1 id="mis-ofertas-title">Mis Ofertas</h1>
+          <p class="eyebrow">OFERTAS</p>
+          <h1 id="mis-ofertas-title">¿Qué estoy ofreciendo?</h1>
         </div>
         <button class="btn primary" type="button" data-nav="publicar" id="ofertas-publicar-btn">
           <i class="fa-solid fa-plus"></i> Nueva oferta
@@ -141,10 +144,6 @@
           <i class="fa-solid fa-circle-check"></i> Activas
           <strong class="offers-tab-count" id="tab-count-activas">0</strong>
         </button>
-        <button class="offers-tab" type="button" data-tab="pausadas">
-          <i class="fa-solid fa-pause-circle"></i> Pausadas
-          <strong class="offers-tab-count" id="tab-count-pausadas">0</strong>
-        </button>
         <button class="offers-tab" type="button" data-tab="solicitudes">
           <i class="fa-solid fa-inbox"></i> Solicitudes
           <strong class="offers-tab-count offers-tab-count--alert" id="tab-count-solicitudes">0</strong>
@@ -153,6 +152,15 @@
           <i class="fa-solid fa-ban"></i> Dadas de baja
           <strong class="offers-tab-count" id="tab-count-bajas">0</strong>
         </button>
+        <button class="offers-tab" type="button" data-tab="pausadas">
+          <i class="fa-solid fa-pause-circle"></i> Pausadas
+          <strong class="offers-tab-count" id="tab-count-pausadas">0</strong>
+        </button>
+      </div>
+
+      <div class="offers-tabs offers-request-filters" id="offer-requests-filters" role="tablist" aria-label="Filtrar solicitudes" hidden>
+        <button class="offers-tab active" type="button" data-offer-requests-filter="in-progress" role="tab" aria-selected="true">En proceso <strong class="offers-tab-count" id="offer-requests-count-in-progress">0</strong></button>
+        <button class="offers-tab" type="button" data-offer-requests-filter="finished" role="tab" aria-selected="false">Finalizadas <strong class="offers-tab-count" id="offer-requests-count-finished">0</strong></button>
       </div>
 
       <div id="offers-list"></div>
@@ -1160,6 +1168,19 @@
         <h3>Reportar incidencia</h3>
         <div class="operation-incident-list" id="operation-incident-list"></div>
       </section>
+    </div>
+  </div>
+
+  <div class="modal-backdrop detail-modal-backdrop" id="reservation-detail-modal" hidden>
+    <div class="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="reservation-detail-title">
+      <div class="modal-head"><div><p class="eyebrow" id="reservation-detail-eyebrow">Operación</p><h2 id="reservation-detail-title">Detalle de la operación</h2></div><button class="icon-btn" type="button" data-close-detail="reservation" aria-label="Cerrar"><i class="fa-solid fa-xmark"></i></button></div>
+      <div id="reservation-detail-content"></div>
+    </div>
+  </div>
+  <div class="modal-backdrop detail-modal-backdrop" id="offer-detail-modal" hidden>
+    <div class="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="offer-detail-title">
+      <div class="modal-head"><div><p class="eyebrow">Oferta publicada</p><h2 id="offer-detail-title">Detalle de la oferta</h2></div><button class="icon-btn" type="button" data-close-detail="offer" aria-label="Cerrar"><i class="fa-solid fa-xmark"></i></button></div>
+      <div id="offer-detail-content"></div>
     </div>
   </div>
 

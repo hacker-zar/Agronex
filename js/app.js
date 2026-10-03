@@ -371,6 +371,8 @@ const SESSION_KEYS = {
 const state = {
   screen:       "catalogo",
   offersTab:    "activas",
+  offerRequestsTab: "in-progress",
+  reservationsTab: "in-progress",
   category:     "Todas",
   search:       "",
   filters:      defaultCatalogFilters(),
@@ -1939,10 +1941,24 @@ function renderCatalog() {
   grid.innerHTML = items.map(machineCard).join("");
 }
 
+function bindDetailModals() {
+  $("#reservation-detail-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "reservation-detail-modal" || event.target.closest('[data-close-detail="reservation"]')) closeReservationDetail();
+  });
+  $("#offer-detail-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "offer-detail-modal" || event.target.closest('[data-close-detail="offer"]')) closeOfferDetail();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { closeReservationDetail(); closeOfferDetail(); }
+  });
+}
+
 function bindListActionDelegation() {
   bindCatalogListActions();
   bindOffersListActions();
   bindReservationsListActions();
+  bindReservationsTabs();
+  bindDetailModals();
 }
 
 function bindCatalogListActions() {
@@ -2303,12 +2319,34 @@ function bindOffersTabs() {
       renderMisOfertas();
     });
   });
+  $$("#offer-requests-filters [data-offer-requests-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.offerRequestsTab = btn.dataset.offerRequestsFilter;
+      renderMisOfertas();
+    });
+  });
+}
+
+function bindReservationsTabs() {
+  $$("#reservations-filters [data-reservations-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.reservationsTab = btn.dataset.reservationsFilter;
+      renderReservations();
+    });
+  });
 }
 
 function bindOffersListActions() {
-  $("#offers-list")?.addEventListener("click", (event) => {
+  [$("#offers-list"), $("#offer-detail-content"), $("#reservation-detail-content")].filter(Boolean).forEach((container) => container.addEventListener("click", (event) => {
+    const requestOpener = event.target.closest("[data-open-reservation-detail]");
+    if (requestOpener && container.id === "offers-list") { openReservationDetail(requestOpener.dataset.reservationId, requestOpener.dataset.detailContext); return; }
+    const opener = event.target.closest("[data-open-offer-detail]");
+    if (opener) { openOfferDetail(opener.dataset.id, opener.dataset.tab); return; }
     const button = event.target.closest("button");
     if (!button || button.disabled) return;
+    if (container.id === "reservation-detail-content" && container.dataset.detailContext !== "offer-request") return;
+    if (container.id === "offer-detail-content") closeOfferDetail();
+    if (container.id === "reservation-detail-content" && container.dataset.detailContext === "offer-request") closeReservationDetail();
 
     if (button.matches(".accept-solicitud-btn")) {
       acceptNegotiatedSchedule(button.dataset.id);
@@ -2398,7 +2436,7 @@ function bindOffersListActions() {
         "Eliminar"
       );
     }
-  });
+  }));
 }
 
 function renderMisOfertas() {
@@ -2412,22 +2450,26 @@ function renderMisOfertas() {
   const pausadas   = myMachines.filter((m) => m.offerStatus === "paused");
   const inactivas  = myMachines.filter((m) => m.offerStatus === "inactive");
 
-  // Solicitudes = reservations pending (that can be resolved as contractor)
-  const solicitudes = state.reservations.filter((reservation) => (
-    activeUserOwnsReservationMachine(reservation)
-    && (isContractorNegotiationStatus(reservation) || contractorCanReviewProducer(reservation))
-  ));
+  const solicitudes = state.reservations.filter(activeUserOwnsReservationMachine);
+  const solicitudesEnProceso = solicitudes.filter((reservation) => !isReservationFinished(reservation));
+  const solicitudesFinalizadas = solicitudes.filter(isReservationFinished);
 
   $("#tab-count-activas").textContent    = activas.length;
   $("#tab-count-pausadas").textContent   = pausadas.length;
   $("#tab-count-bajas").textContent      = inactivas.length;
-  $("#tab-count-solicitudes").textContent = solicitudes.length;
+  $("#tab-count-solicitudes").textContent = solicitudesEnProceso.length;
 
   // Keep alert style on solicitudes
   const solTab = document.querySelector('[data-tab="solicitudes"] .offers-tab-count');
-  if (solTab) {
-    solTab.classList.toggle("offers-tab-count--alert", solicitudes.length > 0);
-  }
+  if (solTab) solTab.classList.toggle("offers-tab-count--alert", solicitudesEnProceso.length > 0);
+  $("#offer-requests-filters").hidden = state.offersTab !== "solicitudes";
+  $$("#offer-requests-filters [data-offer-requests-filter]").forEach((btn) => {
+    const selected = btn.dataset.offerRequestsFilter === state.offerRequestsTab;
+    btn.classList.toggle("active", selected);
+    btn.setAttribute("aria-selected", String(selected));
+  });
+  $("#offer-requests-count-in-progress").textContent = solicitudesEnProceso.length;
+  $("#offer-requests-count-finished").textContent = solicitudesFinalizadas.length;
 
   const list   = $("#offers-list");
   const empty  = $("#offers-empty");
@@ -2446,11 +2488,14 @@ function renderMisOfertas() {
     items = inactivas;
     emptyText = "No diste de baja ninguna oferta.";
   } else if (tab === "solicitudes") {
-    list.innerHTML = solicitudes.map(solicitudCard).join("");
-    empty.hidden = solicitudes.length > 0;
-    $("#offers-empty-text").textContent = "No hay solicitudes pendientes.";
+    items = state.offerRequestsTab === "finished" ? solicitudesFinalizadas : solicitudesEnProceso;
+    list.innerHTML = items.map(solicitudCard).join("");
+    empty.hidden = items.length > 0;
+    $("#offers-empty-text").textContent = state.offerRequestsTab === "finished"
+      ? "Todavía no hay solicitudes finalizadas."
+      : "No hay solicitudes en proceso.";
 
-    if (solicitudes.length === 0) list.innerHTML = "";
+    if (items.length === 0) list.innerHTML = "";
     return;
   }
 
@@ -2460,6 +2505,30 @@ function renderMisOfertas() {
 }
 
 function offerCard(machine, tab) {
+  const icon = categoryIcons[machine.category] || "fa-tractor";
+  const pending = pendingRequestsForMachine(machine.id).length;
+  const statusClass = machine.offerStatus === "active" ? "status-active" : machine.offerStatus === "paused" ? "status-paused" : "status-inactive";
+  return `<article class="offer-card offer-card--compact"><span class="offer-icon"><i class="fa-solid ${icon}"></i></span><button class="compact-card-main" type="button" data-open-offer-detail data-id="${escapeHTML(machine.id)}" data-tab="${escapeHTML(tab)}"><span class="compact-card-heading"><strong>${escapeHTML(machine.title)}</strong><span class="status-pill ${statusClass}">${escapeHTML(offerStatusLabels[machine.offerStatus] || machine.offerStatus)}</span></span><span class="compact-card-meta"><span><i class="fa-solid fa-location-dot"></i> ${escapeHTML(machine.location)}</span><span><i class="fa-solid fa-dollar-sign"></i> ${priceDisplay(machine)}</span><span><i class="fa-regular fa-calendar"></i> ${escapeHTML(machineAvailabilityLabel(machine))}</span></span><span class="compact-card-foot">${pending ? `<span class="compact-request-count">${pending} solicitud${pending === 1 ? "" : "es"} pendiente${pending === 1 ? "" : "s"}</span>` : "Oferta publicada"}<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span></button></article>`;
+}
+
+function solicitudCard(reservation) {
+  const statusLabel = statusLabels[reservation.status] || reservation.status;
+  const counterpart = reservationRequesterLabel(reservation);
+  return `<article class="offer-solicitud-card offer-solicitud-card--compact"><button class="compact-card-main" type="button" data-open-reservation-detail data-reservation-id="${escapeHTML(reservation.id)}" data-detail-context="offer-request"><span class="compact-card-heading"><strong>${reservationJobLabel(reservation)}</strong><span class="status-pill status-${escapeHTML(reservation.status)}">${escapeHTML(statusLabel)}</span></span><span class="compact-card-meta"><span><i class="fa-solid fa-user"></i> ${counterpart}</span><span><i class="fa-regular fa-calendar"></i> ${formatDate(reservation.date || reservation.createdAt)}</span><span><i class="fa-solid fa-tag"></i> ${escapeHTML(reservation.machineTitle || "Oferta")}</span></span><span class="compact-card-foot">Solicitud recibida <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span></button></article>`;
+}
+
+function openOfferDetail(machineId, tab = state.offersTab) {
+  const machine = findMachine(machineId);
+  if (!machine) return;
+  $("#offer-detail-title").textContent = machine.title || "Detalle de la oferta";
+  $("#offer-detail-content").innerHTML = offerDetailMarkup(machine, tab);
+  $("#offer-detail-modal").hidden = false;
+  document.body.classList.add("modal-open");
+}
+
+function closeOfferDetail() { $("#offer-detail-modal").hidden = true; document.body.classList.remove("modal-open"); }
+
+function offerDetailMarkup(machine, tab) {
   const solicitudesPendientes = pendingRequestsForMachine(machine.id).length;
   const offerChangeLocked = offerHasPendingRequests(solicitudesPendientes);
   const offerLockAttr = offerChangeLocked ? 'disabled title="Acepta o rechaza la solicitud pendiente antes de cambiar esta oferta"' : "";
@@ -2511,7 +2580,7 @@ function offerCard(machine, tab) {
   `;
 }
 
-function solicitudCard(reservation) {
+function solicitudDetailMarkup(reservation) {
   const acceptedMark = reservation.status === "accepted" ? '<span class="accepted-request-mark" aria-label="Solicitud aceptada">✅</span>' : "";
   return `
     <div class="offer-solicitud-card">
@@ -2522,12 +2591,13 @@ function solicitudCard(reservation) {
         </div>
         <span class="status-pill status-${reservation.status}">${acceptedMark}${escapeHTML(statusLabels[reservation.status] || reservation.status)}</span>
       </div>
+      ${contractorOperationPanel(reservation)}
       ${solicitudLogisticsPanel(reservation)}
       ${scheduleNegotiationSection(reservation, "contractor")}
-      ${contractorOperationPanel(reservation)}
       ${rescheduleSection(reservation, "contractor")}
       ${contractorScheduleActions(reservation)}
       ${contractorReviewActions(reservation)}
+      ${solicitudMoreDetails(reservation, "contractor")}
     </div>
   `;
 }
@@ -3176,27 +3246,37 @@ function solicitudLogisticsPanel(reservation, viewContext = "contractor") {
         ${executiveInfoCard("fa-regular fa-calendar", "Fecha", formatDateRange(reservation))}
         ${executiveInfoCard("fa-solid fa-tractor", "Trabajo", reservationJobLabel(reservation))}
       </div>
-      <details class="solicitud-more">
-        <summary><span class="solicitud-more-label"></span><i class="fa-solid fa-chevron-down"></i></summary>
-        <div class="solicitud-more-body">
-          <div class="solicitud-more-inner">
-            <div class="solicitud-logistics-head">
-              <span><i class="fa-solid fa-route"></i> Detalle logistico</span>
-            </div>
-            <div class="solicitud-logistics-grid">
-              ${accountCard}
-              ${logisticInfoCard("fa-solid fa-location-dot", "Ubicacion", reservationLocationLabel(reservation))}
-              ${logisticTravelCard(route.timeLabel, route.googleMapsUrl)}
-              ${duration ? logisticInfoCard("fa-solid fa-hourglass-half", "Tiempo de trabajo", duration) : ""}
-              ${logisticInfoCard("fa-solid fa-calculator", "Cantidad", escapeHTML(reservationQuantityLabel(reservation)))}
-            </div>
-            ${map}
-            ${reservation.accessConditions ? `<div class="solicitud-note-card"><strong>Condiciones de acceso</strong><p>${escapeHTML(reservation.accessConditions)}</p></div>` : ""}
-            ${reservation.notes ? `<div class="solicitud-note-card"><strong>Observaciones</strong><p>${escapeHTML(reservation.notes)}</p></div>` : ""}
-          </div>
-        </div>
-      </details>
     </section>
+  `;
+}
+
+function solicitudMoreDetails(reservation, viewContext = "contractor") {
+  const workLocation = reservationWorkLocation(reservation);
+  const map = workLocation ? logisticsMapMarkup(workLocation, reservation) : logisticsMapFallback();
+  const hasSeparateTracking = visibleReservationForActiveUser(reservation)
+    && (operationVisibleForReservation(reservation) || Boolean(reservation.workTracking));
+  const accountCard = reservationAccountCard(reservation, viewContext);
+  const route = reservationRouteInfo(reservation, workLocation);
+  const duration = reservationDurationLabel(reservation);
+  return `
+    <details class="solicitud-more">
+      <summary><span class="solicitud-more-label"></span><i class="fa-solid fa-chevron-down"></i></summary>
+      <div class="solicitud-more-body">
+        <div class="solicitud-more-inner">
+          <div class="solicitud-logistics-head"><span><i class="fa-solid fa-route"></i> Detalle logistico</span></div>
+          <div class="solicitud-logistics-grid">
+            ${accountCard}
+            ${logisticInfoCard("fa-solid fa-location-dot", "Ubicacion", reservationLocationLabel(reservation))}
+            ${logisticTravelCard(route.timeLabel, route.googleMapsUrl)}
+            ${duration ? logisticInfoCard("fa-solid fa-hourglass-half", "Tiempo de trabajo", duration) : ""}
+            ${logisticInfoCard("fa-solid fa-calculator", "Cantidad", escapeHTML(reservationQuantityLabel(reservation)))}
+          </div>
+          ${hasSeparateTracking ? "" : map}
+          ${reservation.accessConditions ? `<div class="solicitud-note-card"><strong>Condiciones de acceso</strong><p>${escapeHTML(reservation.accessConditions)}</p></div>` : ""}
+          ${reservation.notes ? `<div class="solicitud-note-card"><strong>Observaciones</strong><p>${escapeHTML(reservation.notes)}</p></div>` : ""}
+        </div>
+      </div>
+    </details>
   `;
 }
 
@@ -3449,11 +3529,7 @@ function workTrackingPanel(reservation, viewContext = "producer") {
         ${map}
         <div class="work-tracking-meta">
           <div>
-            <span>Estado actual</span>
-            <strong>${escapeHTML(currentOperationState(reservation).label)}</strong>
-          </div>
-          <div>
-            <span>Ultima actualizacion</span>
+            <span>Última señal GPS</span>
             <strong>${escapeHTML(updateLabel)}</strong>
           </div>
           ${tracking.error ? `<p class="tracking-error"><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHTML(tracking.error)}</p>` : ""}
@@ -3568,9 +3644,13 @@ function markAvailabilitySlotPartiallyBooked(machineId) {
 /* RESERVAS */
 
 function bindReservationsListActions() {
-  $("#reservations-list")?.addEventListener("click", (event) => {
+  [$("#reservations-list"), $("#reservation-detail-content")].filter(Boolean).forEach((container) => container.addEventListener("click", (event) => {
+    const opener = event.target.closest("[data-open-reservation-detail]");
+    if (opener) { openReservationDetail(opener.dataset.reservationId, opener.dataset.detailContext); return; }
     const button = event.target.closest("button");
     if (!button || button.disabled) return;
+    if (container.id === "reservation-detail-content" && container.dataset.detailContext === "offer-request") return;
+    if (container.id === "reservation-detail-content") closeReservationDetail();
 
     if (button.matches(".accept-reservation")) {
       setReservationStatus(button.dataset.reservationId, "accepted");
@@ -3635,25 +3715,68 @@ function bindReservationsListActions() {
     if (button.matches(".open-review-btn")) {
       openReviewModal(button.dataset.reservationId, button.dataset.reviewerRole);
     }
-  });
+  }));
 }
 
 function renderReservations() {
   const list  = $("#reservations-list");
-  const note  = $("#reservas-note");
-  note.textContent = "Aqui ves tus solicitudes como productor y las que recibis como contratista.";
 
   const visibleReservations = state.reservations.filter(visibleReservationForActiveUser);
-  const hasReservations = visibleReservations.length > 0;
-  $("#reservations-empty").hidden = hasReservations;
-  $("#reservations-empty-text").textContent = "Todavia no hiciste ninguna solicitud de maquinaria.";
-  $("#reservations-empty-cta").dataset.nav  = "catalogo";
+  const inProgress = visibleReservations.filter((reservation) => !isReservationFinished(reservation));
+  const finished = visibleReservations.filter(isReservationFinished);
+  const showFinished = state.reservationsTab === "finished";
+  const items = showFinished ? finished : inProgress;
+  $("#reservations-count-in-progress").textContent = inProgress.length;
+  $("#reservations-count-finished").textContent = finished.length;
+  $$("#reservations-filters [data-reservations-filter]").forEach((btn) => {
+    const selected = btn.dataset.reservationsFilter === state.reservationsTab;
+    btn.classList.toggle("active", selected);
+    btn.setAttribute("aria-selected", String(selected));
+  });
+  $("#reservations-empty").hidden = items.length > 0;
+  $("#reservations-empty-text").textContent = showFinished
+    ? "Todavía no hay operaciones finalizadas."
+    : "No hay operaciones en proceso.";
+  $("#reservations-empty-cta").hidden = showFinished;
+  $("#reservations-empty-cta").dataset.nav = "catalogo";
 
-  list.innerHTML = visibleReservations.map((r) => reservationCard(r)).join("");
+  list.innerHTML = items.map((r) => reservationCard(r)).join("");
 
 }
 
+function isReservationFinished(reservation) {
+  return ["done", "rejected", "cancelled"].includes(reservation?.status);
+}
+
 function reservationCard(reservation) {
+  const sentByActiveUser = activeUserRequestedReservation(reservation);
+  const counterpart = sentByActiveUser ? reservationContractorLabel(reservation) : reservationRequesterLabel(reservation);
+  const location = reservation.requestMode === "truck" || reservation.category === "Camion"
+    ? `${clean(reservation.origin) || "Origen"} · ${clean(reservation.destination) || "Destino"}`
+    : clean(reservation.field || reservation.location?.address || "Ubicación a confirmar");
+  const context = reservationEconomicContext(reservation);
+  const total = context.estimate?.estimatedValue > 0 ? formatEstimatedMoney(context.estimate.estimatedValue) : "A confirmar";
+  const statusLabel = reservationStatusLabelForCurrentUser(reservation, sentByActiveUser);
+  const stateIndex = reservationStepIndex(reservation.status);
+  const terminal = ["rejected", "cancelled"].includes(reservation.status);
+  const progress = terminal ? "" : `<div class="reservation-summary-progress" role="img" aria-label="${escapeHTML(statusLabel)}: ${reservationWorkflowSteps(reservation).map(step => step.label).join(", ")}">${reservationWorkflowSteps(reservation).map((step, index) => `<span class="summary-progress-step ${index < stateIndex ? "is-done" : ""} ${index === stateIndex ? "is-current" : ""}"><i></i><small>${escapeHTML(step.label)}</small></span>`).join("")}</div>`;
+  return `<article class="reservation-card reservation-card--compact" data-reservation-id="${escapeHTML(reservation.id)}"><button class="compact-card-main" type="button" data-open-reservation-detail data-reservation-id="${escapeHTML(reservation.id)}"><span class="compact-card-heading"><strong>${reservationJobLabel(reservation)}</strong><span class="status-pill status-${escapeHTML(reservation.status)}">${escapeHTML(statusLabel)}</span></span><span class="compact-card-meta"><span><i class="fa-solid fa-user"></i> ${counterpart}</span><span><i class="fa-solid fa-location-dot"></i> ${escapeHTML(location)}</span><span><i class="fa-regular fa-calendar"></i> ${formatDate(reservation.date || reservation.createdAt)}</span></span>${progress}<span class="compact-card-foot"><span>Total: <strong>${escapeHTML(total)}</strong></span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span></button></article>`;
+}
+
+function openReservationDetail(reservationId, detailContext = "reservation") {
+  const reservation = state.reservations.find(item => String(item.id) === String(reservationId));
+  if (!reservation) return;
+  $("#reservation-detail-eyebrow").textContent = detailContext === "offer-request" ? "Solicitud de tu oferta" : "Operación";
+  $("#reservation-detail-title").textContent = reservationJobLabel(reservation).replace(/&amp;/g, "&");
+  $("#reservation-detail-content").dataset.detailContext = detailContext;
+  $("#reservation-detail-content").innerHTML = detailContext === "offer-request" ? solicitudDetailMarkup(reservation) : reservationDetailMarkup(reservation, detailContext);
+  $("#reservation-detail-modal").hidden = false;
+  document.body.classList.add("modal-open");
+}
+
+function closeReservationDetail() { $("#reservation-detail-modal").hidden = true; document.body.classList.remove("modal-open"); }
+
+function reservationDetailMarkup(reservation, detailContext = "reservation") {
   const sentByActiveUser = activeUserRequestedReservation(reservation);
   const canResolve    = reservation.status === "pending" && !sentByActiveUser;
   const canStartWork  = reservation.status === "accepted" && !sentByActiveUser;
@@ -3684,14 +3807,15 @@ function reservationCard(reservation) {
           <span class="status-pill status-${reservation.status}">${escapeHTML(statusLabel)}</span>
         </div>
       </div>
+      ${reservationStatusTrack(reservation)}
       ${solicitudLogisticsPanel(reservation, "producer")}
       ${scheduleNegotiationSection(reservation, "producer")}
-      ${reservationStatusTrack(reservation)}
       ${workTrackingPanel(reservation, "producer")}
       ${rescheduleSection(reservation)}
       ${delaySection(reservation)}
       ${equipmentMarkup}
       ${actionsMarkup}
+      ${solicitudMoreDetails(reservation, "producer")}
     </article>
   `;
 }

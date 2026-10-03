@@ -6024,3 +6024,44 @@ label textarea:focus {
   color:var(--profile-producer);
   box-shadow:none;
 }
+
+/* NexuDrive: resumenes compactos con detalle bajo demanda */
+.detail-modal-backdrop { align-items: center; z-index: 80; }
+.detail-modal { width: min(780px, 100%); border-radius: 20px; }
+.detail-modal > #reservation-detail-content,
+.detail-modal > #offer-detail-content { max-height: min(72vh, 760px); overflow: auto; padding: 2px 4px 8px 0; }
+.compact-card-main { display: flex; width: 100%; flex-direction: column; gap: 12px; padding: 18px 20px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.compact-card-main:focus-visible { outline: 3px solid var(--primary); outline-offset: -3px; border-radius: 14px; }
+.reservation-card--compact, .offer-card--compact, .offer-solicitud-card--compact { display: flex; align-items: center; margin: 0 0 12px; overflow: hidden; border: 1px solid var(--line, #e4e8df); border-radius: 16px; background: var(--surface, #fff); box-shadow: 0 3px 12px rgba(25, 40, 18, .045); }
+.reservation-card--compact { display: block; }
+.offer-card--compact .offer-icon { flex: 0 0 48px; margin-left: 18px; }
+.offer-card--compact .compact-card-main { flex: 1; }
+.compact-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.compact-card-heading > strong { font-size: 17px; line-height: 1.3; }
+.compact-card-meta { display: flex; flex-wrap: wrap; gap: 7px 18px; color: var(--muted, #68736a); font-size: 13px; }
+.compact-card-meta > span { display: inline-flex; align-items: center; gap: 6px; }
+.compact-card-meta i { color: var(--primary, #397a24); }
+.compact-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding-top: 9px; border-top: 1px solid var(--line, #e4e8df); color: var(--muted, #68736a); font-size: 13px; }
+.compact-card-foot > i { color: var(--primary, #397a24); }
+.compact-request-count { color: var(--primary, #397a24); font-weight: 700; }
+.reservation-summary-progress { display: flex; align-items: flex-start; width: 100%; padding: 2px 0 0; }
+.summary-progress-step { position: relative; display: flex; flex: 1; flex-direction: column; align-items: center; gap: 6px; color: var(--muted, #68736a); text-align: center; }
+.summary-progress-step:not(:last-child)::after { position: absolute; z-index: 0; top: 5px; left: 50%; width: 100%; height: 2px; background: var(--line, #dfe5da); content: ""; }
+.summary-progress-step.is-done:not(:last-child)::after { background: var(--primary, #397a24); }
+.summary-progress-step > i { z-index: 1; width: 12px; height: 12px; border: 2px solid var(--line, #cbd4c7); border-radius: 50%; background: #fff; }
+.summary-progress-step.is-done > i, .summary-progress-step.is-current > i { border-color: var(--primary, #397a24); background: var(--primary, #397a24); }
+.summary-progress-step.is-current > i { box-shadow: 0 0 0 3px rgba(57, 122, 36, .14); }
+.summary-progress-step small { font-size: 11px; line-height: 1.2; }
+#screen-reservas > .page-head h1, #screen-mis-ofertas > .page-head h1 { max-width: 720px; }
+@media (max-width: 600px) {
+  .detail-modal-backdrop { align-items: flex-end; padding: 0; }
+  .detail-modal { width: 100%; max-height: 92dvh; border-radius: 20px 20px 0 0; padding: 18px 16px max(20px, env(safe-area-inset-bottom)); }
+  .detail-modal > #reservation-detail-content, .detail-modal > #offer-detail-content { max-height: calc(92dvh - 90px); }
+  .compact-card-main { gap: 10px; padding: 15px; }
+  .compact-card-heading { align-items: flex-start; }
+  .compact-card-heading > strong { font-size: 15px; }
+  .compact-card-meta { gap: 7px 12px; font-size: 12px; }
+  .summary-progress-step small { font-size: 9px; }
+  .offer-card--compact .offer-icon { flex-basis: 38px; margin-left: 12px; }
+}
+@media (min-width: 601px) { .summary-progress-step small { display: none; } }

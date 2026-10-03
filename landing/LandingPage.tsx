@@ -1,8 +1,8 @@
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   ArrowDown,
   ArrowUpRight,
   Check,
-  Clock3,
   Compass,
   Truck,
 } from "lucide-react";
@@ -11,6 +11,8 @@ import { EcosystemList } from "./components/EcosystemList";
 import { HeroVisual } from "./components/HeroVisual";
 import { Brand } from "./components/Brand";
 import { Navigation } from "./components/Navigation";
+
+const AgronexParticleField = lazy(() => import("./components/AgronexParticleField").then((module) => ({ default: module.AgronexParticleField })));
 
 const steps = [
   {
@@ -56,12 +58,20 @@ function Footer() {
 }
 
 export default function LandingPage() {
+  const [showParticleField, setShowParticleField] = useState(false);
+  useEffect(() => {
+    // Let the headline and product preview paint before downloading the 3D renderer.
+    const timer = window.setTimeout(() => setShowParticleField(true), 900);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   return (
     <div className="landing-site">
       <Navigation />
       <main className="w-full">
         <section className="hero-section" id="inicio">
           <div className="hero-glow" aria-hidden="true" />
+          {showParticleField && <Suspense fallback={null}><AgronexParticleField /></Suspense>}
           <div className="hero-inner">
             <div className="hero-copy">
               <SectionEyebrow light>Una plataforma para el agro argentino</SectionEyebrow>
@@ -111,7 +121,6 @@ export default function LandingPage() {
                     {number !== "03" && <span className="step-connector" aria-hidden="true" />}
                   </article>
                 ))}
-                <div className="operation-note"><span className="operation-note-icon"><Clock3 size={15} /></span><p>Una vez contratada, la operación puede acompañarse por etapas.</p></div>
               </div>
             </div>
           </div>
