@@ -35,21 +35,25 @@
     <nav class="main-nav" aria-label="Navegacion principal">
       <button class="nav-btn active" type="button" data-nav="catalogo">
         <i class="fa-solid fa-tractor"></i>
-        <span>Catalogo</span>
+        <span>Buscar</span>
       </button>
       <button class="nav-btn" type="button" data-nav="reservas">
-        <i class="fa-solid fa-calendar-check"></i>
-        <span>Reservas</span>
+        <i class="fa-solid fa-route"></i>
+        <span>Operaciones</span>
         <strong id="reservation-badge" class="badge" hidden>0</strong>
+      </button>
+      <button class="nav-btn publish-nav" type="button" data-nav="publicar" aria-label="Publicar una oferta">
+        <i class="fa-solid fa-plus"></i>
+        <span>Publicar</span>
       </button>
       <button class="nav-btn" type="button" data-nav="mis-ofertas">
         <i class="fa-solid fa-tags"></i>
-        <span>Mis Ofertas</span>
+        <span>Mis ofertas</span>
         <strong id="offers-badge" class="badge badge-warning" hidden>0</strong>
       </button>
-      <button class="nav-btn publish-nav" type="button" data-nav="publicar">
-        <i class="fa-solid fa-plus"></i>
-        <span>Publicar</span>
+      <button class="nav-btn" type="button" data-nav="perfil">
+        <i class="fa-regular fa-user"></i>
+        <span>Perfil</span>
       </button>
     </nav>
 
@@ -76,7 +80,10 @@
 
     <!-- CATALOGO -->
     <section class="screen active" id="screen-catalogo" aria-labelledby="catalogo-title">
-      <h1 id="catalogo-title" class="sr-only">Catalogo de maquinaria</h1>
+      <div class="catalog-mobile-heading">
+        <p class="eyebrow">NEXUDRIVE</p>
+        <h1 id="catalogo-title">Encontrá maquinaria y servicios</h1>
+      </div>
       <div class="catalog-desktop-layout">
         <aside class="catalog-desktop-sidebar" id="catalog-desktop-filters" aria-label="Filtros de catalogo">
           <button class="catalog-filter-collapse-btn" type="button" id="catalog-filter-collapse" aria-label="Colapsar filtros" aria-expanded="true" title="Colapsar filtros">
@@ -87,14 +94,26 @@
           <div class="catalog-toolbar">
             <div class="search-box">
               <i class="fa-solid fa-magnifying-glass"></i>
-              <input id="catalog-search" type="search" placeholder="Buscar equipo, marca o zona...">
+              <input id="catalog-search" type="search" placeholder="Máquina, camión o servicio">
             </div>
             <button class="filter-icon-btn" type="button" id="filter-toggle" aria-label="Filtros" onclick="window.openCatalogFilters?.()">
               <i class="fa-solid fa-sliders"></i>
             </button>
           </div>
 
-          <p class="results-meta" id="results-meta">0 resultados</p>
+          <div class="catalog-region-context">
+            <span><i class="fa-solid fa-location-dot" aria-hidden="true"></i><span><small>Zona piloto</small><strong>Las Rosas · Bouquet</strong></span></span>
+            <button class="link-button" type="button" data-open-mobile-location>Cambiar zona</button>
+          </div>
+
+          <div class="catalog-results-header">
+            <p class="results-meta" id="results-meta">Ofertas disponibles</p>
+            <label class="catalog-sort-label" for="catalog-sort">Ordenar
+              <select id="catalog-sort" aria-label="Ordenar resultados">
+                <option value="relevance">Relevancia</option><option value="price-asc">Precio menor</option><option value="price-desc">Precio mayor</option><option value="availability">Disponibilidad próxima</option><option value="rating">Mejor reputación</option>
+              </select>
+            </label>
+          </div>
           <div class="catalog-grid" id="catalog-grid"></div>
           <div class="empty-state" id="catalog-empty" hidden>
             <i class="fa-regular fa-folder-open"></i>
@@ -110,13 +129,24 @@
       <div class="page-head compact">
         <div>
           <p class="eyebrow">OPERACIONES</p>
-          <h1 id="reservas-title">¿Qué está pasando con mis trabajos?</h1>
+          <h1 id="reservas-title">Operaciones</h1>
         </div>
       </div>
 
-      <div class="offers-tabs operation-filters" id="reservations-filters" role="tablist" aria-label="Filtrar operaciones">
-        <button class="offers-tab active" type="button" data-reservations-filter="in-progress" role="tab" aria-selected="true">En proceso <strong class="offers-tab-count" id="reservations-count-in-progress">0</strong></button>
+      <div class="reservation-direction-tabs" id="reservation-directions" role="tablist" aria-label="Quién inició la solicitud">
+        <button class="reservation-direction-tab active" type="button" data-reservation-direction="my-requests" role="tab" aria-selected="true">
+          <span><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i> Mis solicitudes</span>
+          <strong id="reservations-count-requested">0</strong>
+        </button>
+        <button class="reservation-direction-tab" type="button" data-reservation-direction="received" role="tab" aria-selected="false">
+          <span><i class="fa-solid fa-inbox" aria-hidden="true"></i> Solicitudes recibidas</span>
+          <strong id="reservations-count-received">0</strong>
+        </button>
+      </div>
+      <div class="offers-tabs operation-filters" id="reservations-filters" role="tablist" aria-label="Filtrar por estado general">
+        <button class="offers-tab active" type="button" data-reservations-filter="in-progress" role="tab" aria-selected="true">En curso <strong class="offers-tab-count" id="reservations-count-in-progress">0</strong></button>
         <button class="offers-tab" type="button" data-reservations-filter="finished" role="tab" aria-selected="false">Finalizadas <strong class="offers-tab-count" id="reservations-count-finished">0</strong></button>
+        <button class="offers-tab" type="button" data-reservations-filter="cancelled" role="tab" aria-selected="false">Canceladas / Rechazadas <strong class="offers-tab-count" id="reservations-count-cancelled">0</strong></button>
       </div>
       <div class="reservations-list" id="reservations-list"></div>
       <div class="empty-state" id="reservations-empty" hidden>
@@ -167,7 +197,7 @@
       <div class="empty-state" id="offers-empty" hidden>
         <i class="fa-solid fa-tags"></i>
         <p id="offers-empty-text">No tenés ofertas activas todavía.</p>
-        <button class="btn primary" type="button" data-nav="publicar">Publicar tu primer equipo</button>
+        <button class="btn primary" type="button" id="offers-empty-cta" data-nav="publicar">Publicar tu primer equipo</button>
       </div>
     </section>
 
@@ -449,6 +479,21 @@
       </div>
     </section>
 
+    <section class="screen error-screen" id="screen-error" aria-labelledby="error-title" aria-live="polite">
+      <div class="error-card">
+        <div class="error-icon" id="error-icon" aria-hidden="true"><i class="fa-solid fa-circle-exclamation"></i></div>
+        <p class="eyebrow" id="error-code">ERROR</p>
+        <h1 id="error-title" tabindex="-1">Algo salió mal</h1>
+        <p class="error-description" id="error-description"></p>
+        <div class="error-actions">
+          <button class="btn primary" type="button" data-error-action="back" hidden>Volver atrás</button>
+          <button class="btn primary" type="button" data-error-action="home" hidden>Volver al inicio</button>
+          <button class="btn primary" type="button" data-error-action="login" hidden>Iniciar sesión</button>
+          <button class="btn primary" type="button" data-error-action="retry" hidden>Intentar nuevamente</button>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <!-- CENTRO DE NOTIFICACIONES -->
@@ -573,7 +618,7 @@
       <div class="modal-head">
         <div>
           <p class="eyebrow">Matching</p>
-          <h2>Filtrar maquinaria</h2>
+          <h2>Ajustá tu búsqueda</h2>
         </div>
         <button class="icon-btn" type="button" id="filters-close" aria-label="Cerrar filtros">
           <i class="fa-solid fa-xmark"></i>
@@ -629,6 +674,10 @@
             <input id="distance-filter" type="number" min="1" step="1" inputmode="numeric" placeholder="km">
           </label>
           <label class="desktop-filter-only">
+            <span>Precio minimo</span>
+            <input id="min-price-filter" type="number" min="1" step="1" inputmode="numeric" placeholder="$">
+          </label>
+          <label class="desktop-filter-only">
             <span>Precio maximo</span>
             <input id="price-filter" type="number" min="1" step="1" inputmode="numeric" placeholder="$">
           </label>
@@ -647,6 +696,7 @@
         </div>
         <div class="form-actions">
           <button class="btn ghost" type="button" id="catalog-filters-clear"><i class="fa-solid fa-rotate-left"></i> Limpiar filtros</button>
+          <button class="btn primary" type="button" id="catalog-filters-apply">Ver <span id="catalog-filter-results-count">0 ofertas</span></button>
         </div>
       </div>
       </div>

@@ -370,9 +370,12 @@ const SESSION_KEYS = {
 
 const state = {
   screen:       "catalogo",
+  errorCode:    null,
+  screenBeforeError: "catalogo",
   offersTab:    "activas",
   offerRequestsTab: "in-progress",
   reservationsTab: "in-progress",
+  reservationDirection: "my-requests",
   category:     "Todas",
   search:       "",
   filters:      defaultCatalogFilters(),
@@ -389,6 +392,8 @@ const state = {
   theme:        normalizeTheme(storageService.getString(STORAGE_KEYS.theme, "")),
   profile:      initialProfile(),
   publishStep: 1,
+  publishEditId: null,
+  catalogSort: "relevance",
 };
 
 // Pending confirm action
@@ -426,6 +431,7 @@ function init() {
   ensureDevUserFixtures();
   bindDevUserSwitcher();
   bindNavigation();
+  bindErrorScreens();
   bindDesktopCatalogLayout();
   bindForms();
   bindPublishWizard();
@@ -452,7 +458,10 @@ function init() {
   render();
   resumeActiveWorkTrackingSession();
   persistMachinePricingMigration();
-  openLocationDemoFromQuery();
+  const routeError = errorCodeFromLocation();
+  if (routeError) showErrorScreen(routeError, { explicitRoute: true });
+  else if (!navigator.onLine) showErrorScreen("offline");
+  else openLocationDemoFromQuery();
 }
 
 /* NAVIGATION */
@@ -798,6 +807,11 @@ function bindNavigation() {
   });
 
   $("#filter-toggle").addEventListener("click", openCatalogFilters);
+  $("[data-open-mobile-location]")?.addEventListener("click", () => {
+    openCatalogFilters();
+    window.setTimeout(() => $("#location-filter")?.focus(), 0);
+  });
+  $("#catalog-sort")?.addEventListener("change", (e) => { state.catalogSort = e.target.value; renderCatalog(); });
   $("#filters-close").addEventListener("click", closeCatalogFilters);
   $("#catalog-filters-modal").addEventListener("click", (e) => {
     if (e.target.id === "catalog-filters-modal") closeCatalogFilters();
@@ -825,6 +839,9 @@ function bindNavigation() {
   });
   $("#price-filter")?.addEventListener("input", (e) => {
     updateCatalogFilter((filters) => { filters.maxPrice = clean(e.target.value); });
+  });
+  $("#min-price-filter")?.addEventListener("input", (e) => {
+    updateCatalogFilter((filters) => { filters.minPrice = clean(e.target.value); });
   });
   $("#brand-filter")?.addEventListener("input", (e) => {
     updateCatalogFilter((filters) => { filters.brand = clean(e.target.value); });
@@ -938,7 +955,116 @@ function openLocationDemoFromQuery() {
     openLocationPicker(form);
   }, 300);
 }
+
+const errorScreenContent = {
+  "404": { title: "No encontramos esa página", description: "El recurso que buscás no está disponible o ya no existe.", icon: "fa-magnifying-glass" },
+  "401": { title: "Iniciá sesión para continuar", description: "Necesitás una sesión activa para acceder a este contenido.", icon: "fa-lock" },
+  "403": { title: "No tenés permiso para entrar", description: "Tu cuenta no tiene acceso a este contenido.", icon: "fa-shield-halved" },
+  "500": { title: "Tuvimos un problema", description: "Ocurrió un error interno. Podés intentar cargar la página nuevamente.", icon: "fa-triangle-exclamation" },
+  "503": { title: "Servicio temporalmente no disponible", description: "Estamos teniendo dificultades para responder. Probá nuevamente en unos instantes.", icon: "fa-cloud-arrow-down" },
+  offline: { title: "Sin conexión", description: "Revisá tu conexión a internet y volvé a intentarlo.", icon: "fa-wifi" },
+};
+
+function errorCodeFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  const requested = clean(params.get("error")).toLowerCase();
+  if (["404", "401", "403", "500", "503"].includes(requested)) return requested;
+  if (["offline", "no-connection", "sin-conexion"].includes(requested)) return "offline";
+  const path = decodeURIComponent(window.location.pathname).replace(/\/+$/, "") || "/";
+  const match = path.match(/(?:^|\/)error\/(404|401|403|500|503)$/) || path.match(/\/(404|401|403|500|503)$/);
+  if (match) return match[1];
+  if (["/offline", "/sin-conexion"].includes(path)) return "offline";
+  if (path !== "/" && path !== "/index.html") return "404";
+  return null;
+}
+
+function bindErrorScreens() {
+  $("#screen-error")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-error-action]");
+    if (!button) return;
+    const action = button.dataset.errorAction;
+    if (action === "back") {
+      if (window.history.length > 1) {
+        document.body.classList.remove("error-state");
+        window.history.back();
+      } else navigateHomeFromError();
+      return;
+    }
+    if (action === "home") { navigateHomeFromError(); return; }
+    if (action === "login") {
+      clearErrorLocation();
+      $("#auth-form").dataset.mode = "login";
+      renderAuth();
+      showScreen("acceso");
+      return;
+    }
+    if (action === "retry" && state.errorCode === "offline") {
+      if (navigator.onLine) {
+        clearErrorLocation();
+        showScreen(state.screenBeforeError || "catalogo");
+      }
+      else $("#error-description").textContent = "Seguís sin conexión. Revisá tu conexión a internet y volvé a intentarlo.";
+      return;
+    }
+    if (action === "retry") {
+      if (state.errorRouteExplicit) {
+        clearErrorLocation();
+        showScreen(state.screenBeforeError || "catalogo");
+      } else window.location.reload();
+    }
+  });
+  window.addEventListener("offline", () => showErrorScreen("offline"));
+  window.addEventListener("online", () => {
+    if (state.errorCode === "offline") $("#error-description").textContent = "La conexión volvió. Ya podés intentarlo nuevamente.";
+  });
+  window.addEventListener("popstate", () => {
+    const routeError = errorCodeFromLocation();
+    if (routeError) showErrorScreen(routeError, { explicitRoute: true });
+    else if (state.errorCode) showScreen(state.screenBeforeError || "catalogo");
+  });
+  window.showAgronexError = (code) => showErrorScreen(code);
+}
+
+function showErrorScreen(code, { explicitRoute = false } = {}) {
+  const normalizedCode = String(code).toLowerCase() === "offline" ? "offline" : String(code);
+  const content = errorScreenContent[normalizedCode] || errorScreenContent["500"];
+  if (state.screen !== "error") state.screenBeforeError = state.screen || "catalogo";
+  state.errorCode = normalizedCode;
+  state.errorRouteExplicit = explicitRoute;
+  state.screen = "error";
+  $$(".screen").forEach((screen) => screen.classList.toggle("active", screen.id === "screen-error"));
+  $$(".nav-btn").forEach((button) => button.classList.remove("active"));
+  document.body.classList.add("error-state");
+  $("#error-code").textContent = normalizedCode === "offline" ? "SIN CONEXIÓN" : `ERROR ${normalizedCode}`;
+  $("#error-title").textContent = content.title;
+  $("#error-description").textContent = content.description;
+  $("#error-icon").innerHTML = `<i class="fa-solid ${content.icon}"></i>`;
+  $("#error-title").focus({ preventScroll: true });
+  const actions = {
+    back: normalizedCode === "404",
+    home: ["404", "403", "500"].includes(normalizedCode),
+    login: normalizedCode === "401",
+    retry: ["500", "503", "offline"].includes(normalizedCode),
+  };
+  const homeButton = $("#screen-error [data-error-action='home']");
+  if (homeButton) homeButton.className = ["404", "500"].includes(normalizedCode) ? "btn ghost" : "btn primary";
+  $$("#screen-error [data-error-action]").forEach((button) => { button.hidden = !actions[button.dataset.errorAction]; });
+}
+
+function clearErrorLocation() {
+  if (window.location.pathname !== "/" || window.location.search) window.history.replaceState({}, "", "/");
+  state.errorRouteExplicit = false;
+}
+
+function navigateHomeFromError() {
+  clearErrorLocation();
+  showScreen("catalogo");
+}
+
 function showScreen(screen) {
+  if (screen === "error") return showErrorScreen(state.errorCode || "500");
+  state.errorCode = null;
+  document.body.classList.remove("error-state");
   if (screen === "perfil" && !state.auth) screen = "acceso";
   state.screen = screen;
   $$(".screen").forEach((el) => el.classList.toggle("active", el.id === `screen-${screen}`));
@@ -955,50 +1081,61 @@ function bindForms() {
   $("#publish-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const formEl = e.currentTarget;
+    if (formEl.dataset.processing === "true") return;
     const form = new FormData(formEl);
     const submitBtn = $("#publish-submit");
-    setButtonLoading(submitBtn, true, "Publicando...");
-
-    setTimeout(() => {
-      const machineId = `m-${Date.now()}`;
-      const availabilityWindow = availabilityWindowFromPublishForm(formEl);
-      const availabilitySlot = {
-        id: `slot-${Date.now()}`,
-        machineId,
-        startDate: availabilityWindow.startDate,
-        endDate: availabilityWindow.endDate,
-        estimatedHours: availabilityWindow.estimatedHours,
-        status: "available",
-      };
-      const machine = {
-        id: machineId,
-        title:        clean(form.get("title")),
-        category:     clean(form.get("category")),
-        price:        Number(form.get("price")),
-        precio:       Number(form.get("price")),
-        priceUnit:    normalizePriceUnit(form.get("priceUnit"), clean(form.get("category"))),
-        unidad_precio: normalizePriceUnit(form.get("priceUnit"), clean(form.get("category"))),
-        minHectares:  optionalNumber(form.get("minHectares")),
-        dailyCapacity: optionalNumber(form.get("dailyCapacity")),
-        location:     clean(form.get("location")),
-        availability: availabilityLabelForSlot(availabilitySlot),
-        plate:        normalizePlate(form.get("plate")),
-        owner:        clean(form.get("owner")) || currentUserLabel(),
-        ownerId:      currentUserId(),
-        description:  clean(form.get("description")) || "Maquinaria publicada para solicitar reserva.",
-        distanceKm:   null, rating: null, reviews: 0,
-        offerStatus:  "active",
-      };
-      state.machines.unshift(machine);
-      state.availabilitySlots.unshift(availabilitySlot);
-      saveMachines();
-      saveAvailabilitySlots();
-      formEl.reset();
-      resetPublishWizard();
-      setButtonLoading(submitBtn, false);
-      showToast("¡Maquinaria publicada! Ya aparece en el catálogo.");
-      showScreen("mis-ofertas");
-    }, 500);
+    formEl.dataset.processing = "true";
+    const editing = state.publishEditId ? findMachine(state.publishEditId) : null;
+    const editId = state.publishEditId;
+    const isEdit = Boolean(editing && editId);
+    setButtonLoading(submitBtn, true, isEdit ? "Guardando..." : "Publicando...");
+    window.setTimeout(() => {
+      try {
+        const machineId = isEdit ? editing.id : `m-${Date.now()}`;
+        const availabilityWindow = availabilityWindowFromPublishForm(formEl);
+        const availabilitySlot = {
+          ...(findAvailabilitySlot(machineId) || {}),
+          id: findAvailabilitySlot(machineId)?.id || `slot-${Date.now()}`,
+          machineId,
+          startDate: availabilityWindow.startDate,
+          endDate: availabilityWindow.endDate,
+          estimatedHours: availabilityWindow.estimatedHours,
+          status: findAvailabilitySlot(machineId)?.status || "available",
+        };
+        const machine = {
+          ...(isEdit ? editing : {}),
+          id: machineId,
+          title: clean(form.get("title")), category: clean(form.get("category")),
+          price: Number(form.get("price")), precio: Number(form.get("price")),
+          priceUnit: normalizePriceUnit(form.get("priceUnit"), clean(form.get("category"))),
+          unidad_precio: normalizePriceUnit(form.get("priceUnit"), clean(form.get("category"))),
+          minHectares: optionalNumber(form.get("minHectares")), dailyCapacity: optionalNumber(form.get("dailyCapacity")),
+          location: clean(form.get("location")), availability: availabilityLabelForSlot(availabilitySlot),
+          plate: normalizePlate(form.get("plate")), owner: clean(form.get("owner")) || currentUserLabel(),
+          ownerId: isEdit ? editing.ownerId : currentUserId(),
+          description: clean(form.get("description")) || "Maquinaria publicada para solicitar reserva.",
+          distanceKm: isEdit ? editing.distanceKm : null, rating: isEdit ? editing.rating : null,
+          reviews: isEdit ? editing.reviews : 0, offerStatus: isEdit ? editing.offerStatus : "active",
+        };
+        if (isEdit) state.machines = state.machines.map((item) => item.id === machineId ? machine : item);
+        else state.machines.unshift(machine);
+        const slotIndex = state.availabilitySlots.findIndex((item) => item.machineId === machineId);
+        if (slotIndex >= 0) state.availabilitySlots[slotIndex] = availabilitySlot;
+        else state.availabilitySlots.unshift(availabilitySlot);
+        saveMachines(); saveAvailabilitySlots();
+        state.publishEditId = null;
+        formEl.reset(); formEl.dataset.processing = "false";
+        resetPublishWizard();
+        setButtonLoading(submitBtn, false);
+        showToast(isEdit ? "Oferta actualizada." : "¡Maquinaria publicada! Ya aparece en el catálogo.");
+        showScreen("mis-ofertas");
+        if (isEdit) openOfferDetail(machineId, machine.offerStatus === "paused" ? "pausadas" : machine.offerStatus === "inactive" ? "bajas" : "activas");
+      } catch (error) {
+        console.error("No se pudo guardar la oferta", error);
+        formEl.dataset.processing = "false"; setButtonLoading(submitBtn, false);
+        showToast("No pudimos guardar la oferta. Revisá los datos e intentá de nuevo.");
+      }
+    }, 250);
   });
 
   const requestForm = $("#request-form");
@@ -1035,7 +1172,8 @@ function bindForms() {
   });
 
   formControl(requestForm, "job").addEventListener("change", () => toggleJobOther(requestForm));
-  formControl(requestForm, "date").addEventListener("change", () => syncRequestDateRange(requestForm));
+  formControl(requestForm, "date").addEventListener("change", () => syncRequestDateRange(requestForm));
+
   formControl(requestForm, "hectares").addEventListener("input", () => updateRequestEstimate(requestForm));
   ["estimatedTons", "estimatedBags", "estimatedTrips", "estimatedKm", "estimatedServiceHours", "estimatedDays", "origin", "destination"].forEach((name) => {
     formControl(requestForm, name)?.addEventListener("input", () => {
@@ -1426,6 +1564,8 @@ function updatePublishPreview() {
 
 function resetPublishWizard() {
   state.publishStep = 1;
+  $("#publicar-title").textContent = "Publicar maquinaria";
+  $("#publish-submit").querySelector(".btn-label").innerHTML = '<i class="fa-solid fa-check"></i> Publicar';
   $$("#publish-category-grid .pub-cat-btn").forEach((b) => b.classList.remove("selected"));
   syncPublishPricingFields("");
   updatePublishPreview();
@@ -1922,7 +2062,7 @@ function renderCategoryFilters() {
 
 function renderCatalog() {
   const grid = $("#catalog-grid");
-  const items = state.machines.filter((m) => {
+  let items = state.machines.filter((m) => {
     const matchesCat = state.category === "Todas" || m.category === state.category;
     const text = `${m.title} ${m.brand || ""} ${m.year || ""} ${m.plate || ""} ${m.category} ${m.location} ${m.owner} ${m.availability}`.toLowerCase();
     return matchesCat
@@ -1932,12 +2072,19 @@ function renderCatalog() {
       && matchesReputationFilter(m)
       && matchesDesktopCatalogFilters(m);
   });
+  const availableDate = (m) => availabilitySlotForMachine(m)?.startDate || (isAvailableToday(m) ? "0000-00-00" : isAvailableTomorrow(m) ? "0000-00-01" : "9999-99-99");
+  if (state.catalogSort === "price-asc") items.sort((a, b) => Number(a.price) - Number(b.price));
+  if (state.catalogSort === "price-desc") items.sort((a, b) => Number(b.price) - Number(a.price));
+  if (state.catalogSort === "availability") items.sort((a, b) => availableDate(a).localeCompare(availableDate(b)));
+  if (state.catalogSort === "rating") items.sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0));
 
   $("#catalog-empty").hidden = items.length > 0;
   $("#catalog-empty-text").textContent = hasActiveCatalogFilters()
-    ? "No hay maquinaria para esta busqueda. Proba limpiando filtros."
-    : "Todavia no hay maquinaria publicada.";
-  $("#results-meta").textContent = `${items.length} resultado${items.length === 1 ? "" : "s"}`;
+    ? "No encontramos ofertas con esos criterios. Probá cambiar la zona o ajustar los filtros."
+    : "Todavía no hay ofertas publicadas en esta zona.";
+  $("#results-meta").textContent = `${items.length} oferta${items.length === 1 ? "" : "s"}`;
+  const filterCount = $("#catalog-filter-results-count");
+  if (filterCount) filterCount.textContent = `${items.length} oferta${items.length === 1 ? "" : "s"}`;
   grid.innerHTML = items.map(machineCard).join("");
 }
 
@@ -1963,9 +2110,9 @@ function bindListActionDelegation() {
 
 function bindCatalogListActions() {
   $("#catalog-grid")?.addEventListener("click", (event) => {
-    const requestButton = event.target.closest(".request-btn");
-    if (requestButton) {
-      openRequestModal(requestButton.dataset.machineId);
+    const viewButton = event.target.closest(".view-offer-btn");
+    if (viewButton) {
+      openMachineDetailPanel(viewButton.dataset.machineId);
       return;
     }
     const reportButton = event.target.closest(".report-btn");
@@ -1973,9 +2120,9 @@ function bindCatalogListActions() {
       openReportModal(reportButton.dataset.machineId);
       return;
     }
-    if (event.target.closest(".public-profile-trigger")) return;
+    if (event.target.closest(".public-profile-trigger, button, a, input, select")) return;
     const card = event.target.closest(".machine-card[data-machine-id]");
-    if (card && window.matchMedia("(min-width: 1200px)").matches) openMachineDetailPanel(card.dataset.machineId);
+    if (card) openMachineDetailPanel(card.dataset.machineId);
   });
 }
 
@@ -2023,6 +2170,7 @@ function syncCatalogFilterControls(filters = state.filters) {
   }
   if ($("#distance-filter")) $("#distance-filter").value = filters.maxDistanceKm || "";
   if ($("#price-filter")) $("#price-filter").value = filters.maxPrice || "";
+  if ($("#min-price-filter")) $("#min-price-filter").value = filters.minPrice || "";
   if ($("#brand-filter")) $("#brand-filter").value = filters.brand || "";
   if ($("#power-filter")) $("#power-filter").value = filters.minPowerHp || "";
 }
@@ -2037,6 +2185,7 @@ function hasActiveCatalogFilters() {
     || Boolean(state.filters.locationPoint)
     || Boolean(state.filters.maxDistanceKm)
     || Boolean(state.filters.maxPrice)
+    || Boolean(state.filters.minPrice)
     || Boolean(state.filters.brand)
     || Boolean(state.filters.minPowerHp);
 }
@@ -2085,6 +2234,7 @@ function matchesDesktopCatalogFilters(machine) {
     if (Number.isFinite(distanceKm) && Number.isFinite(maxDistanceKm) && distanceKm > maxDistanceKm) return false;
   }
   if (filters.maxPrice && Number(machine.price) > Number(filters.maxPrice)) return false;
+  if (filters.minPrice && Number(machine.price) < Number(filters.minPrice)) return false;
   const machinePower = Number(machine.powerHp || machine.hp || String(machine.title).match(/(\d+)\s*hp/i)?.[1]);
   if (filters.minPowerHp && Number.isFinite(machinePower) && machinePower < Number(filters.minPowerHp)) return false;
   return true;
@@ -2126,10 +2276,7 @@ function machineCard(machine) {
   const availableTomorrow = !availableToday && isAvailableTomorrow(machine);
   const slot = availabilitySlotForMachine(machine);
   const availabilityLabel = machineAvailabilityLabel(machine);
-  const availabilityStatus = slot ? availabilitySlotStatusLabel(slot.status) : "Ventana flexible";
-  const slotUnavailable = slot?.status === "unavailable";
   const availabilityClass = availableToday ? "available-today" : (availableTomorrow ? "available-tomorrow" : "");
-  const catalogBadgeClass = machine.badge === "Nuevo" ? "catalog-badge-new" : machine.badge === "Respuesta rápida" ? "catalog-badge-fast" : "";
   return `
     <article class="machine-card ${availabilityClass}" data-machine-id="${escapeHTML(machine.id)}">
       <div class="machine-media">
@@ -2146,10 +2293,8 @@ function machineCard(machine) {
         </div>
         <div class="machine-meta">
           <span><i class="fa-solid fa-location-dot"></i>${escapeHTML(machine.location)}${hasDistance ? ` · ${machine.distanceKm} km` : ""}</span>
-          <span><i class="fa-regular fa-calendar-check"></i>${escapeHTML(availabilityLabel)}</span>
-          <span><i class="fa-solid fa-layer-group"></i>${escapeHTML(availabilityStatus)}</span>
-          <span><i class="fa-solid fa-user-tie"></i>${profileTrigger({ type: "contractor", machineId: machine.id, label: machine.owner })}</span>
-          ${hasRating ? `<span><i class="fa-solid fa-star"></i>${machine.rating.toFixed(1)}${machine.reviews ? ` (${machine.reviews})` : ""}</span>` : ""}
+          <span class="machine-availability-summary"><i class="fa-regular fa-calendar-check"></i>${escapeHTML(availabilityLabel)}</span>
+          <span class="machine-contractor-summary"><i class="fa-solid fa-user-tie"></i>${profileTrigger({ type: "contractor", machineId: machine.id, label: machine.owner })}${hasRating ? ` <span class="machine-card-rating"><i class="fa-solid fa-star"></i> ${machine.rating.toFixed(1)}${machine.reviews ? ` (${machine.reviews})` : ""}</span>` : ""}</span>
         </div>
         <p class="machine-description">${escapeHTML(machine.description)}</p>
         <div class="card-footer">
@@ -2157,8 +2302,8 @@ function machineCard(machine) {
             <strong>${priceAmountLabel(machine)}</strong>
             <span>${priceUnitPreviewLabel(machine.priceUnit)}</span>
           </div>
-          <button class="btn primary request-btn" type="button" data-machine-id="${escapeHTML(machine.id)}" ${slotUnavailable ? "disabled" : ""}>
-            ${slotUnavailable ? "No disponible" : "Solicitar"}
+          <button class="btn primary view-offer-btn" type="button" data-machine-id="${escapeHTML(machine.id)}">
+            Ver oferta
           </button>
         </div>
       </div>
@@ -2228,14 +2373,14 @@ function closeMachineDetailPanel() {
 function machineDetailMarkup(machine) {
   const slot = availabilitySlotForMachine(machine);
   const hasRating = typeof machine.rating === "number";
+  const catalogBadgeClass = machine.badge === "Nuevo" ? "catalog-badge-new" : machine.badge === "Respuesta rápida" ? "catalog-badge-fast" : "";
   const specs = [
-    ["Marca", machine.brand || "Sin cargar"],
-    ["A\u00f1o", machine.year || "Sin cargar"],
-    ["Categoria", machine.category],
-    ["Patente", normalizePlate(machine.plate || "") || "Sin cargar"],
-    ["Operario", machine.operator ? "Incluido" : "A coordinar"],
-    ["Estado", offerStatusLabels[machine.offerStatus || "active"] || "Activa"],
-  ];
+    ["Categoría", machine.category],
+    ["Marca", machine.brand],
+    ["Año", machine.year],
+    ["Patente", normalizePlate(machine.plate || "")],
+    ["Operario", typeof machine.operator === "boolean" ? (machine.operator ? "Incluido" : "A coordinar") : ""],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
   return `
     <div class="machine-detail-hero">
       <div class="machine-detail-media">
@@ -2271,12 +2416,10 @@ function machineDetailMarkup(machine) {
             <span>${escapeHTML(slot ? availabilitySlotStatusLabel(slot.status) : "Ventana flexible")}</span>
           </div>
         </div>
-        <div class="machine-detail-calendar">
-          ${machineDetailCalendarDays(slot)}
-        </div>
+        ${slot ? `<div class="machine-detail-calendar">${machineDetailCalendarDays(slot)}</div>` : `<p class="availability-to-coordinate">Las fechas exactas se coordinan al enviar la solicitud.</p>`}
       </section>
       <section class="machine-detail-section">
-        <h3>Propietario</h3>
+        <h3>Contratista</h3>
         <div class="machine-detail-owner">
           <span class="user-chip-avatar">${escapeHTML(initialsFor(machine.owner || "AG"))}</span>
           <div>
@@ -2286,6 +2429,12 @@ function machineDetailMarkup(machine) {
           </div>
         </div>
       </section>
+    </div>
+    <div class="machine-detail-sticky-cta">
+      <div class="price"><strong>${priceAmountLabel(machine)}</strong><span>${priceUnitPreviewLabel(machine.priceUnit)}</span></div>
+      <button class="btn primary request-btn" type="button" data-machine-id="${escapeHTML(machine.id)}" ${slot?.status === "unavailable" ? "disabled" : ""}>
+        <i class="fa-solid fa-calendar-plus"></i> ${slot?.status === "unavailable" ? "No disponible" : "Solicitar"}
+      </button>
     </div>
   `;
 }
@@ -2328,6 +2477,12 @@ function bindOffersTabs() {
 }
 
 function bindReservationsTabs() {
+  $$("#reservation-directions [data-reservation-direction]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.reservationDirection = btn.dataset.reservationDirection;
+      renderReservations();
+    });
+  });
   $$("#reservations-filters [data-reservations-filter]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.reservationsTab = btn.dataset.reservationsFilter;
@@ -2344,6 +2499,11 @@ function bindOffersListActions() {
     if (opener) { openOfferDetail(opener.dataset.id, opener.dataset.tab); return; }
     const button = event.target.closest("button");
     if (!button || button.disabled) return;
+    if (container.id === "offer-detail-content" && button.matches(".offer-edit-btn, .offer-duplicate-btn")) {
+      const machine = findMachine(button.dataset.id);
+      if (machine) openPublishForMachine(machine, button.matches(".offer-edit-btn"));
+      return;
+    }
     if (container.id === "reservation-detail-content" && container.dataset.detailContext !== "offer-request") return;
     if (container.id === "offer-detail-content") closeOfferDetail();
     if (container.id === "reservation-detail-content" && container.dataset.detailContext === "offer-request") closeReservationDetail();
@@ -2397,12 +2557,14 @@ function bindOffersListActions() {
     if (button.matches(".offer-pause-btn")) {
       if (setOfferStatus(button.dataset.id, "paused")) {
         showToast("Oferta pausada. No aparece en el catalogo hasta que la actives.");
+        openOfferDetail(button.dataset.id, "pausadas");
       }
       return;
     }
     if (button.matches(".offer-activate-btn")) {
       if (setOfferStatus(button.dataset.id, "active")) {
         showToast("Oferta activada. Ya aparece en el catalogo.");
+        openOfferDetail(button.dataset.id, "activas");
       }
       return;
     }
@@ -2478,17 +2640,25 @@ function renderMisOfertas() {
   let items = [];
   let emptyText = "";
 
+  const emptyCta = $("#offers-empty-cta");
   if (tab === "activas") {
     items = activas;
+    emptyCta.hidden = false;
+    emptyCta.textContent = "Publicar una oferta";
     emptyText = "No tenés ofertas activas todavía.";
   } else if (tab === "pausadas") {
     items = pausadas;
+    emptyCta.hidden = false;
+    emptyCta.textContent = "Publicar una oferta";
     emptyText = "No tenés ofertas pausadas.";
   } else if (tab === "bajas") {
     items = inactivas;
+    emptyCta.hidden = false;
+    emptyCta.textContent = "Publicar una oferta";
     emptyText = "No diste de baja ninguna oferta.";
   } else if (tab === "solicitudes") {
     items = state.offerRequestsTab === "finished" ? solicitudesFinalizadas : solicitudesEnProceso;
+    emptyCta.hidden = true;
     list.innerHTML = items.map(solicitudCard).join("");
     empty.hidden = items.length > 0;
     $("#offers-empty-text").textContent = state.offerRequestsTab === "finished"
@@ -2517,6 +2687,35 @@ function solicitudCard(reservation) {
   return `<article class="offer-solicitud-card offer-solicitud-card--compact"><button class="compact-card-main" type="button" data-open-reservation-detail data-reservation-id="${escapeHTML(reservation.id)}" data-detail-context="offer-request"><span class="compact-card-heading"><strong>${reservationJobLabel(reservation)}</strong><span class="status-pill status-${escapeHTML(reservation.status)}">${escapeHTML(statusLabel)}</span></span><span class="compact-card-meta"><span><i class="fa-solid fa-user"></i> ${counterpart}</span><span><i class="fa-regular fa-calendar"></i> ${formatDate(reservation.date || reservation.createdAt)}</span><span><i class="fa-solid fa-tag"></i> ${escapeHTML(reservation.machineTitle || "Oferta")}</span></span><span class="compact-card-foot">Solicitud recibida <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span></button></article>`;
 }
 
+function openPublishForMachine(machine, edit) {
+  if (!machine || !activeUserOwnsMachine(machine)) return;
+  const form = $("#publish-form");
+  const slot = availabilitySlotForMachine(machine);
+  state.publishEditId = edit ? machine.id : null;
+  form.reset();
+  form.elements.category.value = machine.category || "";
+  form.elements.title.value = machine.title || "";
+  form.elements.price.value = machine.price ?? "";
+  form.elements.location.value = machine.location || "";
+  form.elements.availabilityStart.value = slot?.startDate || "";
+  form.elements.availabilityEnd.value = slot?.endDate || "";
+  form.elements.estimatedHours.value = slot?.estimatedHours || "";
+  form.elements.minHectares.value = machine.minHectares || "";
+  form.elements.dailyCapacity.value = machine.dailyCapacity || "";
+  form.elements.plate.value = machine.plate || "";
+  form.elements.owner.value = machine.owner || currentUserLabel();
+  form.elements.description.value = machine.description || "";
+  $("#publicar-title").textContent = edit ? "Editar oferta" : "Duplicar oferta";
+  $("#publish-submit").querySelector(".btn-label").innerHTML = `<i class="fa-solid fa-check"></i> ${edit ? "Guardar cambios" : "Publicar copia"}`;
+  $$("#publish-category-grid .pub-cat-btn").forEach((button) => button.classList.toggle("selected", button.dataset.category === machine.category));
+  syncPublishPricingFields(machine.category);
+  form.elements.priceUnit.value = normalizePriceUnit(machine.priceUnit, machine.category);
+  syncPublishPlateField(machine.category);
+  state.publishStep = 1;
+  closeOfferDetail();
+  updatePublishPreview(); renderPublishStep(); showScreen("publicar");
+}
+
 function openOfferDetail(machineId, tab = state.offersTab) {
   const machine = findMachine(machineId);
   if (!machine) return;
@@ -2539,19 +2738,25 @@ function offerDetailMarkup(machine, tab) {
   const slot = availabilitySlotForMachine(machine);
   const slotStatus = slot ? availabilitySlotStatusLabel(slot.status) : "Sin ventana flexible";
   const slotStatusClass = slot ? availabilitySlotStatusClass(slot.status) : "status-paused";
+  const completedJobs = state.reservations.filter((reservation) => clean(reservation.owner) === clean(machine.owner) && reservation.status === "done").length;
+  const contractorSummary = `<div class="contractor-summary"><strong>${escapeHTML(machine.owner || "Contratista")}</strong>${typeof machine.rating === "number" ? `<span><i class="fa-solid fa-star"></i> ${machine.rating.toFixed(1)}${machine.reviews ? ` · ${machine.reviews} opiniones` : ""}</span>` : ""}${completedJobs ? `<span>${completedJobs} trabajo${completedJobs === 1 ? "" : "s"} realizado${completedJobs === 1 ? "" : "s"}</span>` : ""}<span>${escapeHTML(machine.location || "")}</span></div>`;
   const offerBorderClass = machine.offerStatus === "paused"
     ? "offer-card--paused"
     : isAvailableToday(machine) ? "offer-card--available-today" : "";
 
+  const ownerActions = activeUserOwnsMachine(machine) ? `<button class="btn btn-sm ghost offer-edit-btn" type="button" data-id="${escapeHTML(machine.id)}"><i class="fa-solid fa-pen"></i> Editar oferta</button><button class="btn btn-sm ghost offer-duplicate-btn" type="button" data-id="${escapeHTML(machine.id)}"><i class="fa-regular fa-copy"></i> Duplicar oferta</button>` : "";
   const actions = tab === "activas" ? `
+    ${ownerActions}
     ${solicitudesPendientes > 0 ? `<button class="btn btn-sm warning" disabled><i class="fa-solid fa-inbox"></i> ${solicitudesPendientes} pendiente${solicitudesPendientes > 1 ? "s" : ""}</button>` : ""}
     <button class="btn btn-sm ghost offer-pause-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-pause"></i> Pausar</button>
     <button class="btn btn-sm danger offer-baja-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-ban"></i> Dar de baja</button>
   ` : tab === "pausadas" ? `
+    ${ownerActions}
     ${solicitudesPendientes > 0 ? `<button class="btn btn-sm warning" disabled><i class="fa-solid fa-inbox"></i> ${solicitudesPendientes} pendiente${solicitudesPendientes > 1 ? "s" : ""}</button>` : ""}
     <button class="btn btn-sm primary offer-activate-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-play"></i> Activar</button>
     <button class="btn btn-sm danger offer-baja-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-ban"></i> Dar de baja</button>
   ` : `
+    ${ownerActions}
     ${solicitudesPendientes > 0 ? `<button class="btn btn-sm warning" disabled><i class="fa-solid fa-inbox"></i> ${solicitudesPendientes} pendiente${solicitudesPendientes > 1 ? "s" : ""}</button>` : ""}
     <button class="btn btn-sm ghost offer-activate-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-rotate-left"></i> Reactivar</button>
     <button class="btn btn-sm danger offer-delete-btn" type="button" data-id="${machine.id}" ${offerLockAttr}><i class="fa-solid fa-trash"></i> Eliminar</button>
@@ -2568,12 +2773,14 @@ function offerDetailMarkup(machine, tab) {
           <span class="status-pill ${statusClass}">${statusLabel}</span>
         </div>
         <div class="offer-meta">
+          <span class="category-pill">${escapeHTML(machine.category)}</span>
           <span><i class="fa-solid fa-location-dot"></i>${escapeHTML(machine.location)}</span>
           <span><i class="fa-solid fa-dollar-sign"></i>${priceDisplay(machine)}</span>
           <span><i class="fa-regular fa-calendar-check"></i>${escapeHTML(machineAvailabilityLabel(machine))}</span>
           <span><i class="fa-solid fa-layer-group"></i><strong class="status-pill ${slotStatusClass}">${escapeHTML(slotStatus)}</strong></span>
           ${reservasTotales > 0 ? `<span><i class="fa-solid fa-inbox"></i>${reservasTotales} reserva${reservasTotales > 1 ? "s" : ""}</span>` : ""}
         </div>
+        ${contractorSummary}
         <div class="offer-actions">${actions}</div>
       </div>
     </div>
@@ -3649,6 +3856,11 @@ function bindReservationsListActions() {
     if (opener) { openReservationDetail(opener.dataset.reservationId, opener.dataset.detailContext); return; }
     const button = event.target.closest("button");
     if (!button || button.disabled) return;
+    if (container.id === "offer-detail-content" && button.matches(".offer-edit-btn, .offer-duplicate-btn")) {
+      const machine = findMachine(button.dataset.id);
+      if (machine) openPublishForMachine(machine, button.matches(".offer-edit-btn"));
+      return;
+    }
     if (container.id === "reservation-detail-content" && container.dataset.detailContext === "offer-request") return;
     if (container.id === "reservation-detail-content") closeReservationDetail();
 
@@ -3722,30 +3934,68 @@ function renderReservations() {
   const list  = $("#reservations-list");
 
   const visibleReservations = state.reservations.filter(visibleReservationForActiveUser);
-  const inProgress = visibleReservations.filter((reservation) => !isReservationFinished(reservation));
-  const finished = visibleReservations.filter(isReservationFinished);
-  const showFinished = state.reservationsTab === "finished";
-  const items = showFinished ? finished : inProgress;
+  const requestedByMe = visibleReservations.filter(activeUserRequestedReservation);
+  const requestedOfMe = visibleReservations.filter((reservation) => !activeUserRequestedReservation(reservation) && activeUserOwnsReservationMachine(reservation));
+  const directionReservations = state.reservationDirection === "received" ? requestedOfMe : requestedByMe;
+  const inProgress = directionReservations.filter((reservation) => !isReservationTerminal(reservation));
+  const finished = directionReservations.filter((reservation) => reservation.status === "done");
+  const cancelled = directionReservations.filter(isReservationCancelledOrRejected);
+  const items = state.reservationsTab === "finished"
+    ? finished
+    : state.reservationsTab === "cancelled" ? cancelled : inProgress;
+  $("#reservations-count-requested").textContent = requestedByMe.length;
+  $("#reservations-count-received").textContent = requestedOfMe.length;
   $("#reservations-count-in-progress").textContent = inProgress.length;
   $("#reservations-count-finished").textContent = finished.length;
+  $("#reservations-count-cancelled").textContent = cancelled.length;
+  $$("#reservation-directions [data-reservation-direction]").forEach((btn) => {
+    const selected = btn.dataset.reservationDirection === state.reservationDirection;
+    btn.classList.toggle("active", selected);
+    btn.setAttribute("aria-selected", String(selected));
+  });
   $$("#reservations-filters [data-reservations-filter]").forEach((btn) => {
     const selected = btn.dataset.reservationsFilter === state.reservationsTab;
     btn.classList.toggle("active", selected);
     btn.setAttribute("aria-selected", String(selected));
   });
   $("#reservations-empty").hidden = items.length > 0;
-  $("#reservations-empty-text").textContent = showFinished
-    ? "Todavía no hay operaciones finalizadas."
-    : "No hay operaciones en proceso.";
-  $("#reservations-empty-cta").hidden = showFinished;
+  const directionLabel = state.reservationDirection === "received" ? "que hayas recibido" : "que hayas enviado";
+  $("#reservations-empty-text").textContent = state.reservationsTab === "finished"
+    ? `Todavía no hay operaciones ${directionLabel} que hayan finalizado correctamente.`
+    : state.reservationsTab === "cancelled"
+      ? `No hay operaciones ${directionLabel} canceladas o rechazadas.`
+      : state.reservationDirection === "received"
+        ? "Todavía no recibiste solicitudes en curso."
+        : "Todavía no tenés solicitudes en curso.";
+  $("#reservations-empty-cta").hidden = state.reservationsTab !== "in-progress" || state.reservationDirection !== "my-requests";
   $("#reservations-empty-cta").dataset.nav = "catalogo";
 
   list.innerHTML = items.map((r) => reservationCard(r)).join("");
 
 }
 
+function reservationNeedsAction(reservation) {
+  const sentByActiveUser = activeUserRequestedReservation(reservation);
+  if (reservation.status === "pending") return !sentByActiveUser;
+  if (reservation.status === "schedule_counter") return sentByActiveUser;
+  if (reservation.status === "original_kept") return !sentByActiveUser;
+  const pendingRescheduleRequest = pendingRescheduleFor(reservation.id);
+  if (!pendingRescheduleRequest) return false;
+  const requestedByCurrentUser = clean(pendingRescheduleRequest.requestedBy) === currentUserId()
+    || clean(pendingRescheduleRequest.requestedByName) === currentUserLabel();
+  return !requestedByCurrentUser;
+}
+
 function isReservationFinished(reservation) {
   return ["done", "rejected", "cancelled"].includes(reservation?.status);
+}
+
+function isReservationCancelledOrRejected(reservation) {
+  return ["rejected", "cancelled"].includes(reservation?.status);
+}
+
+function isReservationTerminal(reservation) {
+  return reservation?.status === "done" || isReservationCancelledOrRejected(reservation);
 }
 
 function reservationCard(reservation) {
@@ -3760,7 +4010,18 @@ function reservationCard(reservation) {
   const stateIndex = reservationStepIndex(reservation.status);
   const terminal = ["rejected", "cancelled"].includes(reservation.status);
   const progress = terminal ? "" : `<div class="reservation-summary-progress" role="img" aria-label="${escapeHTML(statusLabel)}: ${reservationWorkflowSteps(reservation).map(step => step.label).join(", ")}">${reservationWorkflowSteps(reservation).map((step, index) => `<span class="summary-progress-step ${index < stateIndex ? "is-done" : ""} ${index === stateIndex ? "is-current" : ""}"><i></i><small>${escapeHTML(step.label)}</small></span>`).join("")}</div>`;
-  return `<article class="reservation-card reservation-card--compact" data-reservation-id="${escapeHTML(reservation.id)}"><button class="compact-card-main" type="button" data-open-reservation-detail data-reservation-id="${escapeHTML(reservation.id)}"><span class="compact-card-heading"><strong>${reservationJobLabel(reservation)}</strong><span class="status-pill status-${escapeHTML(reservation.status)}">${escapeHTML(statusLabel)}</span></span><span class="compact-card-meta"><span><i class="fa-solid fa-user"></i> ${counterpart}</span><span><i class="fa-solid fa-location-dot"></i> ${escapeHTML(location)}</span><span><i class="fa-regular fa-calendar"></i> ${formatDate(reservation.date || reservation.createdAt)}</span></span>${progress}<span class="compact-card-foot"><span>Total: <strong>${escapeHTML(total)}</strong></span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span></button></article>`;
+  const directionLabel = sentByActiveUser ? "La solicitaste vos" : "Te la solicitaron";
+  const attribution = reservationTerminalAttribution(reservation);
+  return `<article class="reservation-card reservation-card--compact" data-reservation-id="${escapeHTML(reservation.id)}"><button class="compact-card-main" type="button" data-open-reservation-detail data-reservation-id="${escapeHTML(reservation.id)}"><span class="compact-card-heading"><strong>${reservationJobLabel(reservation)}</strong><span class="status-pill status-${escapeHTML(reservation.status)}">${escapeHTML(statusLabel)}</span></span><span class="compact-card-meta"><span class="reservation-direction-label"><i class="fa-solid ${sentByActiveUser ? "fa-arrow-up-right-from-square" : "fa-inbox"}"></i> ${directionLabel}</span><span><i class="fa-solid fa-user"></i> ${counterpart}</span><span><i class="fa-solid fa-location-dot"></i> ${escapeHTML(location)}</span><span><i class="fa-regular fa-calendar"></i> ${formatDate(reservation.date || reservation.createdAt)}</span>${attribution ? `<span class="reservation-terminal-attribution"><i class="fa-solid ${reservation.status === "rejected" ? "fa-circle-xmark" : "fa-ban"}"></i> ${attribution}</span>` : ""}</span>${progress}<span class="compact-card-foot"><span>Total: <strong>${escapeHTML(total)}</strong></span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span></button></article>`;
+}
+
+function reservationTerminalAttribution(reservation) {
+  if (!isReservationCancelledOrRejected(reservation)) return "";
+  const action = reservation.status === "rejected" ? "Rechazada" : "Cancelada";
+  const actor = clean(reservation.statusChangedByName || reservation.cancelledByName || reservation.rejectedByName);
+  if (actor) return `${action} por ${escapeHTML(actor)}`;
+  if (reservation.status === "rejected") return `Rechazada por ${reservationContractorLabel(reservation)}`;
+  return "Cancelada · autor no registrado";
 }
 
 function openReservationDetail(reservationId, detailContext = "reservation") {
@@ -3807,6 +4068,8 @@ function reservationDetailMarkup(reservation, detailContext = "reservation") {
           <span class="status-pill status-${reservation.status}">${escapeHTML(statusLabel)}</span>
         </div>
       </div>
+      ${reservationNeedsAction(reservation) ? `<p class="reservation-action-notice"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> Requiere tu respuesta</p>` : ""}
+      ${reservationTerminalAttribution(reservation) ? `<p class="reservation-terminal-detail">${reservationTerminalAttribution(reservation)}</p>` : ""}
       ${reservationStatusTrack(reservation)}
       ${solicitudLogisticsPanel(reservation, "producer")}
       ${scheduleNegotiationSection(reservation, "producer")}
@@ -3950,7 +4213,8 @@ function scheduleNegotiationSection(reservation, viewContext = "producer") {
 }
 
 function reservationStatusLabelForCurrentUser(reservation, sentByActiveUser = activeUserRequestedReservation(reservation)) {
-  if (sentByActiveUser && reservation.status === "pending") return "Solicitud enviada";
+  if (reservationNeedsAction(reservation)) return "Requiere tu respuesta";
+  if (sentByActiveUser && reservation.status === "pending") return "Pendiente de respuesta";
   if (sentByActiveUser && reservation.status === "schedule_counter") return "Nuevo horario propuesto";
   if (sentByActiveUser && reservation.status === "original_kept") return "Horario original enviado";
   return statusLabels[reservation.status] || reservation.status;
@@ -4355,6 +4619,9 @@ function cancelScheduleRequest(reservationId) {
   if (reservation.scheduleProposal) reservation.scheduleProposal.status = "cancelled";
   const now = new Date().toISOString();
   reservation.status = "cancelled";
+  reservation.statusChangedBy = currentUserId();
+  reservation.statusChangedByName = currentUserLabel();
+  reservation.statusChangedAt = now;
   reservation.firstResponseAt = reservation.firstResponseAt || now;
   reservation.resolvedAt = now;
   saveReservations();
@@ -5070,6 +5337,11 @@ function setReservationStatus(id, status) {
   const res = state.reservations.find((r) => r.id === id);
   if (!res) return;
   const now = new Date().toISOString();
+  if (["cancelled", "rejected"].includes(status)) {
+    res.statusChangedBy = currentUserId();
+    res.statusChangedByName = currentUserLabel();
+    res.statusChangedAt = now;
+  }
   if (["accepted", "rejected", "cancelled"].includes(status) && !res.firstResponseAt) res.firstResponseAt = now;
   if (status === "accepted") {
     res.acceptedAt = res.acceptedAt || now;
@@ -5307,7 +5579,8 @@ function syncRequestMode(form, machine) {
 function clearHiddenRequestFields(form, config) {
   const machine = findMachine(formControl(form, "machineId")?.value);
   const quantityFields = requestQuantityFieldsForPriceUnit(normalizePriceUnit(machine?.priceUnit, machine?.category));
-  if (!config.showDeadline) formControl(form, "dateEnd").value = "";
+  if (!config.showDeadline) formControl(form, "dateEnd").value = "";
+
   if (!config.showUrgency) formControl(form, "urgency").value = "flexible";
   if (!config.showCrop) formControl(form, "crop").value = "";
   if (!config.showGrain) formControl(form, "grainType").value = "";
@@ -5357,7 +5630,7 @@ function reservationFromForm(form, machine) {
     category:     machine.category,
     status:       "pending",
     date:         formControl(form, "date").value,
-    
+
     startTime:    clean(formControl(form, "startTime").value),
     endTime:      clean(formControl(form, "endTime").value),
     serviceType:  config.serviceType,
@@ -6467,7 +6740,6 @@ function openNotificationCenter() {
   backdrop.hidden = false;
   toggle?.classList.add("active");
   toggle?.setAttribute("aria-expanded", "true");
-  markAllNotificationsRead(true);
 }
 
 function closeNotificationCenter() {

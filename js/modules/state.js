@@ -25,6 +25,7 @@ export function defaultCatalogFilters() {
     locationPoint: null,
     maxDistanceKm: "",
     maxPrice: "",
+    minPrice: "",
     brand: "",
     minPowerHp: "",
   };
