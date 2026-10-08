@@ -106,14 +106,7 @@
             <button class="link-button" type="button" data-open-mobile-location>Cambiar zona</button>
           </div>
 
-          <div class="catalog-results-header">
-            <p class="results-meta" id="results-meta">Ofertas disponibles</p>
-            <label class="catalog-sort-label" for="catalog-sort">Ordenar
-              <select id="catalog-sort" aria-label="Ordenar resultados">
-                <option value="relevance">Relevancia</option><option value="price-asc">Precio menor</option><option value="price-desc">Precio mayor</option><option value="availability">Disponibilidad próxima</option><option value="rating">Mejor reputación</option>
-              </select>
-            </label>
-          </div>
+          <p class="results-meta" id="results-meta">Ofertas disponibles</p>
           <div class="catalog-grid" id="catalog-grid"></div>
           <div class="empty-state" id="catalog-empty" hidden>
             <i class="fa-regular fa-folder-open"></i>
@@ -204,28 +197,32 @@
     <!-- PUBLICAR -->
     <section class="screen" id="screen-publicar" aria-labelledby="publicar-title">
       <div class="publish-shell">
-        <aside class="publish-preview anim-card">
+        <aside class="publish-preview anim-card" id="publish-preview">
+          <button class="publish-preview-toggle" id="publish-preview-toggle" type="button" aria-expanded="false" aria-controls="publish-preview-modal">
+            <span><i class="fa-regular fa-eye" aria-hidden="true"></i> Vista previa</span>
+            <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+          </button>
           <p class="eyebrow">Vista previa</p>
-          <div class="preview-machine">
-            <div class="preview-media" id="publish-preview-icon">
-              <i class="fa-solid fa-tractor"></i>
-            </div>
-            <span class="category-pill" id="publish-preview-category">Maquinaria</span>
-            <h2 id="publish-preview-title">Tu equipo publicado</h2>
-            <p id="publish-preview-description">Completá los datos para ver como aparecerá en el catalogo.</p>
-            <div class="machine-meta">
-              <span><i class="fa-solid fa-location-dot"></i><strong id="publish-preview-location">Zona de trabajo</strong></span>
-              <span><i class="fa-regular fa-calendar-check"></i><strong id="publish-preview-availability">Disponibilidad</strong></span>
-              <span><i class="fa-solid fa-user-tie"></i><strong id="publish-preview-owner">Contratista</strong></span>
-              <span id="publish-preview-plate-row" hidden><i class="fa-solid fa-id-card"></i><strong id="publish-preview-plate">Patente</strong></span>
-            </div>
-            <div class="card-footer">
-              <div class="price">
-                <strong id="publish-preview-price">USD -</strong>
-                <span id="publish-preview-price-unit">unidad a definir</span>
+          <div class="preview-machine" id="publish-preview-content">
+              <div class="preview-media" id="publish-preview-icon">
+                <i class="fa-solid fa-tractor"></i>
               </div>
-              <button class="btn primary" type="button" disabled>Solicitar</button>
-            </div>
+              <span class="category-pill" id="publish-preview-category">Maquinaria</span>
+              <h2 id="publish-preview-title">Tu equipo publicado</h2>
+              <p id="publish-preview-description">Completá los datos para ver como aparecerá en el catalogo.</p>
+              <div class="machine-meta">
+                <span><i class="fa-solid fa-location-dot"></i><strong id="publish-preview-location">Zona de trabajo</strong></span>
+                <span><i class="fa-regular fa-calendar-check"></i><strong id="publish-preview-availability">Disponibilidad</strong></span>
+                <span><i class="fa-solid fa-user-tie"></i><strong id="publish-preview-owner">Contratista</strong></span>
+                <span id="publish-preview-plate-row" hidden><i class="fa-solid fa-id-card"></i><strong id="publish-preview-plate">Patente</strong></span>
+              </div>
+              <div class="card-footer">
+                <div class="price">
+                  <strong id="publish-preview-price">USD -</strong>
+                  <span id="publish-preview-price-unit">unidad a definir</span>
+                </div>
+                <button class="btn primary" type="button" disabled>Solicitar</button>
+              </div>
           </div>
         </aside>
 
@@ -426,8 +423,8 @@
             </div>
           </section>
           <div class="form-actions">
+            <p class="profile-autosave-note">Los cambios se guardan automáticamente.</p>
             <button class="btn ghost" type="button" id="logout-btn"><i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar sesión</button>
-            <button class="btn primary" type="submit"><span class="btn-label"><i class="fa-solid fa-check"></i> Guardar perfil</span></button>
           </div>
         </form>
       </div>
@@ -495,6 +492,21 @@
     </section>
 
   </main>
+
+  <div class="modal-backdrop publish-preview-backdrop" id="publish-preview-modal" hidden>
+    <section class="publish-preview-modal" role="dialog" aria-modal="true" aria-labelledby="publish-preview-modal-title">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Publicación</p>
+          <h2 id="publish-preview-modal-title">Así se verá tu oferta</h2>
+        </div>
+        <button class="icon-btn" type="button" id="publish-preview-close" aria-label="Cerrar vista previa">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div id="publish-preview-modal-body"></div>
+    </section>
+  </div>
 
   <!-- CENTRO DE NOTIFICACIONES -->
   <div class="notification-backdrop" id="notification-backdrop" hidden></div>
@@ -627,6 +639,12 @@
       <div id="catalog-filters-modal-body">
       <div class="catalog-filters-panel" id="catalog-filters-panel">
         <div class="filter-group">
+          <label class="catalog-sort-label" for="catalog-sort">
+            <span>Ordenar resultados</span>
+            <select id="catalog-sort" aria-label="Ordenar resultados">
+              <option value="relevance">Relevancia</option><option value="price-asc">Precio menor</option><option value="price-desc">Precio mayor</option><option value="availability">Disponibilidad próxima</option><option value="rating">Mejor reputación</option>
+            </select>
+          </label>
           <label>
             <span>Disponibilidad</span>
             <select id="availability-filter">

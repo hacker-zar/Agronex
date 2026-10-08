@@ -1209,6 +1209,33 @@ function bindForms() {
 
 /* PUBLISH WIZARD */
 function bindPublishWizard() {
+  const previewToggle = $("#publish-preview-toggle");
+  const previewModal = $("#publish-preview-modal");
+  const previewContent = $("#publish-preview-content");
+  const previewModalBody = $("#publish-preview-modal-body");
+  const closePreview = () => {
+    if (previewContent && previewContent.parentElement !== $("#publish-preview")) $("#publish-preview").append(previewContent);
+    if (previewModal) previewModal.hidden = true;
+    previewToggle?.setAttribute("aria-expanded", "false");
+    document.body.classList.remove("modal-open");
+    previewToggle?.focus({ preventScroll: true });
+  };
+  previewToggle?.addEventListener("click", () => {
+    if (!previewModal || !previewContent || !previewModalBody) return;
+    previewModalBody.append(previewContent);
+    previewModal.hidden = false;
+    previewToggle.setAttribute("aria-expanded", "true");
+    document.body.classList.add("modal-open");
+    $("#publish-preview-close")?.focus({ preventScroll: true });
+  });
+  $("#publish-preview-close")?.addEventListener("click", closePreview);
+  previewModal?.addEventListener("click", (event) => {
+    if (event.target === previewModal) closePreview();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && previewModal && !previewModal.hidden) closePreview();
+  });
+
   $$("#publish-category-grid .pub-cat-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       $("#publish-category").value = btn.dataset.category;
@@ -1586,14 +1613,7 @@ function bindProfile() {
     renderProfile();
     updateOperationCircle();
   });
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    state.profile = profileFromForm();
-    saveProfile();
-    renderProfile();
-    updateOperationCircle();
-    showToast("Perfil actualizado.");
-  });
+  form.addEventListener("submit", (event) => event.preventDefault());
   form.querySelectorAll('input[name="theme"]').forEach((input) => {
     input.addEventListener("change", () => {
       setTheme(input.value);
@@ -3936,6 +3956,8 @@ function renderReservations() {
   const visibleReservations = state.reservations.filter(visibleReservationForActiveUser);
   const requestedByMe = visibleReservations.filter(activeUserRequestedReservation);
   const requestedOfMe = visibleReservations.filter((reservation) => !activeUserRequestedReservation(reservation) && activeUserOwnsReservationMachine(reservation));
+  const requestedByMeActive = requestedByMe.filter((reservation) => !isReservationTerminal(reservation));
+  const requestedOfMeActive = requestedOfMe.filter((reservation) => !isReservationTerminal(reservation));
   const directionReservations = state.reservationDirection === "received" ? requestedOfMe : requestedByMe;
   const inProgress = directionReservations.filter((reservation) => !isReservationTerminal(reservation));
   const finished = directionReservations.filter((reservation) => reservation.status === "done");
@@ -3943,8 +3965,8 @@ function renderReservations() {
   const items = state.reservationsTab === "finished"
     ? finished
     : state.reservationsTab === "cancelled" ? cancelled : inProgress;
-  $("#reservations-count-requested").textContent = requestedByMe.length;
-  $("#reservations-count-received").textContent = requestedOfMe.length;
+  $("#reservations-count-requested").textContent = requestedByMeActive.length;
+  $("#reservations-count-received").textContent = requestedOfMeActive.length;
   $("#reservations-count-in-progress").textContent = inProgress.length;
   $("#reservations-count-finished").textContent = finished.length;
   $("#reservations-count-cancelled").textContent = cancelled.length;
