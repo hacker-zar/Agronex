@@ -11,6 +11,7 @@ import {
   weightedReviewCategoryAverage,
 } from "../js/modules/reputation.js";
 import { isContractorNegotiationStatus } from "../js/modules/reservations.js";
+import { pendingActionForReservation, sortPendingItems } from "../js/modules/pending.js";
 import { clean, escapeHTML, money } from "../js/modules/ui.js";
 
 test("estimateServiceCost calculates totals and rejects incomplete quantities", () => {
@@ -54,6 +55,31 @@ test("reservation negotiation status keeps contractor work visible while action 
   assert.equal(isContractorNegotiationStatus({ status: "accepted" }), true);
   assert.equal(isContractorNegotiationStatus({ status: "done" }, true), true);
   assert.equal(isContractorNegotiationStatus({ status: "done" }), false);
+});
+
+test("actionable pending rules assign each reservation transition to the right participant", () => {
+  assert.equal(pendingActionForReservation({ status: "pending" }, { isRequester: true }), null);
+  assert.equal(pendingActionForReservation({ status: "pending" }, { isOwner: true }), "Responder solicitud");
+  assert.equal(pendingActionForReservation({ status: "schedule_counter" }, { isRequester: true }), "Responder propuesta de horario");
+  assert.equal(pendingActionForReservation({ status: "accepted" }, { isRequester: true }), null);
+  assert.equal(pendingActionForReservation({ status: "accepted" }, { isOwner: true }), "Iniciar trabajo");
+  assert.equal(pendingActionForReservation({ status: "working" }, { isOwner: true }), "Actualizar operación");
+  assert.equal(pendingActionForReservation({ status: "done" }, { isRequester: true }), null);
+  assert.equal(pendingActionForReservation({ status: "cancelled" }, { isOwner: true }), null);
+});
+
+test("pending reschedule waits for the other participant and ordering is stable by category and update time", () => {
+  const request = { status: "accepted" };
+  const pendingReschedule = { status: "pending" };
+  assert.equal(pendingActionForReservation(request, { isRequester: true, pendingReschedule, rescheduleRequestedByCurrentUser: true }), null);
+  assert.equal(pendingActionForReservation(request, { isRequester: true, pendingReschedule }), "Revisar cambio de fecha");
+  assert.equal(pendingActionForReservation(request, { isOwner: true, pendingReschedule, rescheduleRequestedByCurrentUser: true }), null);
+  const sorted = sortPendingItems([
+    { id: "old-received", category: "received", updatedAt: "2026-01-01" },
+    { id: "recent-sent", category: "initiated", updatedAt: "2026-10-01" },
+    { id: "new-received", category: "received", updatedAt: "2026-10-02" },
+  ]);
+  assert.deepEqual(sorted.map((item) => item.id), ["new-received", "old-received", "recent-sent"]);
 });
 
 test("reputation score combines reviews, operations and response time", () => {

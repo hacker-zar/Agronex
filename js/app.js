@@ -24,6 +24,7 @@ import {
 import {
   isContractorNegotiationStatus as isContractorNegotiationStatusRule,
 } from "./modules/reservations.js";
+import { pendingActionForReservation, sortPendingItems } from "./modules/pending.js";
 import {
   clean,
   escapeHTML,
@@ -373,7 +374,6 @@ const state = {
   errorCode:    null,
   screenBeforeError: "catalogo",
   offersTab:    "activas",
-  offerRequestsTab: "in-progress",
   reservationsTab: "in-progress",
   reservationDirection: "my-requests",
   category:     "Todas",
@@ -403,6 +403,14 @@ let notificationGroupTimer = null;
 let notificationToastQueue = [];
 let lastUserActivityAt = Date.now();
 let lastOperationUndo = null;
+let pendingMonitorStarted = false;
+let pendingMonitorTimer = null;
+let knownPendingIds = new Set();
+let knownPendingUserId = "";
+let pendingDetailReturn = false;
+let pendingCenterItems = [];
+let pendingActiveIndex = 0;
+let pendingNavigationLock = false;
 let workTrackingSession = null;
 const locationPickerState = { map: null, marker: null, form: null, target: "work", selected: null, operationCircle: null, operationCenterMarker: null, operationCenter: null };
 
@@ -456,12 +464,14 @@ function init() {
   bindListActionDelegation();
   syncMachineRatingsFromReviews();
   render();
+  initializePendingCenter();
   resumeActiveWorkTrackingSession();
   persistMachinePricingMigration();
   const routeError = errorCodeFromLocation();
   if (routeError) showErrorScreen(routeError, { explicitRoute: true });
   else if (!navigator.onLine) showErrorScreen("offline");
   else openLocationDemoFromQuery();
+  if (devUserSwitcherEnabled && new URLSearchParams(window.location.search).has("pending-test")) invokePendingTestCase();
 }
 
 /* NAVIGATION */
@@ -511,6 +521,11 @@ function bindDevUserSwitcher() {
   const root = $("#dev-user-switcher");
   const button = $("#dev-user-button");
   const menu = $("#dev-user-menu");
+  const pendingTestButton = $("#pending-test-case");
+  if (pendingTestButton) {
+    pendingTestButton.hidden = !devUserSwitcherEnabled;
+    if (devUserSwitcherEnabled) pendingTestButton.addEventListener("click", invokePendingTestCase);
+  }
   if (!root || !button || !menu) return;
   if (!devUserSwitcherEnabled) {
     root.hidden = true;
@@ -530,6 +545,45 @@ function bindDevUserSwitcher() {
     if (event.key === "Escape") closeDevUserMenu();
   });
   renderDevUserSwitcher();
+}
+
+function invokePendingTestCase() {
+  if (!devUserSwitcherEnabled) return;
+  const now = new Date();
+  const testCases = [
+    { id: "r-dev-juan1-jose2", job: "Cosecha de soja", dateOffset: 0, hectares: 120 },
+    { id: "r-dev-pending-stack-2", job: "Cosecha de maíz", dateOffset: 1, hectares: 84 },
+    { id: "r-dev-pending-stack-3", job: "Cosecha de trigo", dateOffset: 2, hectares: 96 },
+  ];
+  const sampleIds = new Set(["r-dev-pending-modal-test", ...testCases.map((item) => item.id)]);
+  state.reservations = state.reservations.filter((reservation) => !sampleIds.has(reservation.id));
+  for (const sample of testCases) {
+    const scheduledDate = new Date(now);
+    scheduledDate.setDate(scheduledDate.getDate() + sample.dateOffset);
+    const date = `${scheduledDate.getFullYear()}-${String(scheduledDate.getMonth() + 1).padStart(2, "0")}-${String(scheduledDate.getDate()).padStart(2, "0")}`;
+    const request = devFixtureReservation(
+      sample.id,
+      "dev-juan1",
+      "dev-jose2",
+      "m-dev-jose2-cosechadora",
+      "Cosechadora Case IH 8250",
+      "Cosechadora",
+      "pending",
+      date,
+      sample.hectares,
+    );
+    request.job = sample.job;
+    request.jobType = sample.job;
+    request.serviceType = sample.job;
+    request.createdAt = new Date(now.getTime() + sample.dateOffset * 1000).toISOString();
+    request.updatedAt = request.createdAt;
+    request.isDevPendingTestCase = true;
+    state.reservations.unshift(request);
+  }
+  pendingActiveIndex = 0;
+  switchDevUser("dev-jose2");
+  refreshPendingCenter();
+  openPendingCenter();
 }
 
 function toggleDevUserMenu() {
@@ -1165,9 +1219,10 @@ function bindForms() {
       closeRequestModal();
       openPaymentDemo(reservation);
       updateBadges();
-      state.offersTab = "solicitudes";
-      showToast("Solicitud enviada. La abrimos en Solicitudes para que puedas probar el flujo.");
-      showScreen("mis-ofertas");
+      state.reservationDirection = "my-requests";
+      state.reservationsTab = "in-progress";
+      showToast("Solicitud enviada. Podés seguirla desde Operaciones.");
+      showScreen("reservas");
     }, 500);
   });
 
@@ -1268,7 +1323,8 @@ function renderPublishStep() {
     step.classList.toggle("active", Number(step.dataset.step) === state.publishStep);
   });
   $$(".pub-step-dot").forEach((dot, i) => {
-    dot.classList.toggle("active", i + 1 <= state.publishStep);
+    dot.classList.toggle("completed", i + 1 < state.publishStep);
+    dot.classList.toggle("active", i + 1 === state.publishStep);
   });
   $("#publish-back").hidden   = state.publishStep === 1;
   $("#publish-next").hidden   = state.publishStep === 3;
@@ -2488,12 +2544,6 @@ function bindOffersTabs() {
       renderMisOfertas();
     });
   });
-  $$("#offer-requests-filters [data-offer-requests-filter]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.offerRequestsTab = btn.dataset.offerRequestsFilter;
-      renderMisOfertas();
-    });
-  });
 }
 
 function bindReservationsTabs() {
@@ -2512,7 +2562,7 @@ function bindReservationsTabs() {
 }
 
 function bindOffersListActions() {
-  [$("#offers-list"), $("#offer-detail-content"), $("#reservation-detail-content")].filter(Boolean).forEach((container) => container.addEventListener("click", (event) => {
+  [$("#offers-list"), $("#offer-detail-content"), $("#reservation-detail-content"), $("#pending-center-list")].filter(Boolean).forEach((container) => container.addEventListener("click", (event) => {
     const requestOpener = event.target.closest("[data-open-reservation-detail]");
     if (requestOpener && container.id === "offers-list") { openReservationDetail(requestOpener.dataset.reservationId, requestOpener.dataset.detailContext); return; }
     const opener = event.target.closest("[data-open-offer-detail]");
@@ -2524,7 +2574,7 @@ function bindOffersListActions() {
       if (machine) openPublishForMachine(machine, button.matches(".offer-edit-btn"));
       return;
     }
-    if (container.id === "reservation-detail-content" && container.dataset.detailContext !== "offer-request") return;
+    if (["reservation-detail-content", "pending-center-list"].includes(container.id) && container.dataset.detailContext !== "offer-request") return;
     if (container.id === "offer-detail-content") closeOfferDetail();
     if (container.id === "reservation-detail-content" && container.dataset.detailContext === "offer-request") closeReservationDetail();
 
@@ -2534,6 +2584,10 @@ function bindOffersListActions() {
     }
     if (button.matches(".open-schedule-counter-btn")) {
       openScheduleCounterModal(button.dataset.id);
+      return;
+    }
+    if (button.matches(".open-delay-btn")) {
+      openDelayModal(button.dataset.reservationId);
       return;
     }
     if (button.matches(".accept-reschedule-btn")) {
@@ -2622,6 +2676,7 @@ function bindOffersListActions() {
 }
 
 function renderMisOfertas() {
+  if (!["activas", "pausadas", "bajas"].includes(state.offersTab)) state.offersTab = "activas";
   $$("#offers-tabs .offers-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === state.offersTab);
   });
@@ -2632,26 +2687,9 @@ function renderMisOfertas() {
   const pausadas   = myMachines.filter((m) => m.offerStatus === "paused");
   const inactivas  = myMachines.filter((m) => m.offerStatus === "inactive");
 
-  const solicitudes = state.reservations.filter(activeUserOwnsReservationMachine);
-  const solicitudesEnProceso = solicitudes.filter((reservation) => !isReservationFinished(reservation));
-  const solicitudesFinalizadas = solicitudes.filter(isReservationFinished);
-
   $("#tab-count-activas").textContent    = activas.length;
   $("#tab-count-pausadas").textContent   = pausadas.length;
   $("#tab-count-bajas").textContent      = inactivas.length;
-  $("#tab-count-solicitudes").textContent = solicitudesEnProceso.length;
-
-  // Keep alert style on solicitudes
-  const solTab = document.querySelector('[data-tab="solicitudes"] .offers-tab-count');
-  if (solTab) solTab.classList.toggle("offers-tab-count--alert", solicitudesEnProceso.length > 0);
-  $("#offer-requests-filters").hidden = state.offersTab !== "solicitudes";
-  $$("#offer-requests-filters [data-offer-requests-filter]").forEach((btn) => {
-    const selected = btn.dataset.offerRequestsFilter === state.offerRequestsTab;
-    btn.classList.toggle("active", selected);
-    btn.setAttribute("aria-selected", String(selected));
-  });
-  $("#offer-requests-count-in-progress").textContent = solicitudesEnProceso.length;
-  $("#offer-requests-count-finished").textContent = solicitudesFinalizadas.length;
 
   const list   = $("#offers-list");
   const empty  = $("#offers-empty");
@@ -2676,17 +2714,6 @@ function renderMisOfertas() {
     emptyCta.hidden = false;
     emptyCta.textContent = "Publicar una oferta";
     emptyText = "No diste de baja ninguna oferta.";
-  } else if (tab === "solicitudes") {
-    items = state.offerRequestsTab === "finished" ? solicitudesFinalizadas : solicitudesEnProceso;
-    emptyCta.hidden = true;
-    list.innerHTML = items.map(solicitudCard).join("");
-    empty.hidden = items.length > 0;
-    $("#offers-empty-text").textContent = state.offerRequestsTab === "finished"
-      ? "Todavía no hay solicitudes finalizadas."
-      : "No hay solicitudes en proceso.";
-
-    if (items.length === 0) list.innerHTML = "";
-    return;
   }
 
   empty.hidden = items.length > 0;
@@ -2699,12 +2726,6 @@ function offerCard(machine, tab) {
   const pending = pendingRequestsForMachine(machine.id).length;
   const statusClass = machine.offerStatus === "active" ? "status-active" : machine.offerStatus === "paused" ? "status-paused" : "status-inactive";
   return `<article class="offer-card offer-card--compact"><span class="offer-icon"><i class="fa-solid ${icon}"></i></span><button class="compact-card-main" type="button" data-open-offer-detail data-id="${escapeHTML(machine.id)}" data-tab="${escapeHTML(tab)}"><span class="compact-card-heading"><strong>${escapeHTML(machine.title)}</strong><span class="status-pill ${statusClass}">${escapeHTML(offerStatusLabels[machine.offerStatus] || machine.offerStatus)}</span></span><span class="compact-card-meta"><span><i class="fa-solid fa-location-dot"></i> ${escapeHTML(machine.location)}</span><span><i class="fa-solid fa-dollar-sign"></i> ${priceDisplay(machine)}</span><span><i class="fa-regular fa-calendar"></i> ${escapeHTML(machineAvailabilityLabel(machine))}</span></span><span class="compact-card-foot">${pending ? `<span class="compact-request-count">${pending} solicitud${pending === 1 ? "" : "es"} pendiente${pending === 1 ? "" : "s"}</span>` : "Oferta publicada"}<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span></button></article>`;
-}
-
-function solicitudCard(reservation) {
-  const statusLabel = statusLabels[reservation.status] || reservation.status;
-  const counterpart = reservationRequesterLabel(reservation);
-  return `<article class="offer-solicitud-card offer-solicitud-card--compact"><button class="compact-card-main" type="button" data-open-reservation-detail data-reservation-id="${escapeHTML(reservation.id)}" data-detail-context="offer-request"><span class="compact-card-heading"><strong>${reservationJobLabel(reservation)}</strong><span class="status-pill status-${escapeHTML(reservation.status)}">${escapeHTML(statusLabel)}</span></span><span class="compact-card-meta"><span><i class="fa-solid fa-user"></i> ${counterpart}</span><span><i class="fa-regular fa-calendar"></i> ${formatDate(reservation.date || reservation.createdAt)}</span><span><i class="fa-solid fa-tag"></i> ${escapeHTML(reservation.machineTitle || "Oferta")}</span></span><span class="compact-card-foot">Solicitud recibida <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span></button></article>`;
 }
 
 function openPublishForMachine(machine, edit) {
@@ -2849,6 +2870,8 @@ function contractorOperationPanel(reservation) {
   const current = currentOperationState(reservation);
   const previous = previousOperationState(current.key, reservation);
   const next = nextOperationState(current.key, reservation);
+  const isTransport = operationWorkflowForReservation(reservation) === operationWorkflows.transport;
+  const nextActionLabel = next?.key?.startsWith("arrived_") ? "Confirmar llegada" : current.key === "accepted" && isTransport ? "Iniciar viaje" : next?.action || next?.label;
   const incidents = operationIncidentsMarkup(reservation);
   const locationNote = reservation.locationSharingActive
     ? `<p class="operation-location-note"><i class="fa-solid fa-location-crosshairs"></i> Compartiendo ubicacion durante este trabajo.</p>`
@@ -2872,8 +2895,9 @@ function contractorOperationPanel(reservation) {
         <button class="btn ghost operation-prev-btn" type="button" data-reservation-id="${reservation.id}" ${previous ? "" : "disabled"}>
           <i class="fa-solid fa-arrow-left"></i> ${previous ? escapeHTML(previous.label) : "Inicio"}
         </button>
-        ${next ? `<button class="btn primary operation-next-btn" type="button" data-reservation-id="${reservation.id}"><i class="fa-solid ${next.icon}"></i> ${escapeHTML(next.action || next.label)}</button>` : `<button class="btn primary" type="button" disabled><i class="fa-solid fa-check"></i> Trabajo finalizado</button>`}
+        ${next ? `<button class="btn primary operation-next-btn" type="button" data-reservation-id="${reservation.id}"><i class="fa-solid ${next.icon}"></i> ${escapeHTML(nextActionLabel)}</button>` : `<button class="btn primary" type="button" disabled><i class="fa-solid fa-check"></i> Trabajo finalizado</button>`}
         <button class="btn ghost open-operation-sheet-btn" type="button" data-reservation-id="${reservation.id}"><i class="fa-solid fa-sliders"></i> Actualizar estado</button>
+        <button class="btn ghost open-delay-btn" type="button" data-reservation-id="${reservation.id}"><i class="fa-regular fa-clock"></i> Reportar retraso</button>
       </div>
       ${locationNote}
       ${workTrackingPanel(reservation, "contractor")}
@@ -3036,6 +3060,11 @@ function advanceOperationState(reservationId) {
   if (!reservation) return;
   const next = nextOperationState(currentOperationState(reservation).key, reservation);
   if (!next) return;
+  const currentKey = currentOperationState(reservation).key;
+  if (["arrived_origin", "arrived_destination", "arrived_field"].includes(currentKey)) {
+    confirmAction("Confirmar llegada", `¿Avanzar a ${next.label.toLowerCase()}?`, `Se actualizará la operación ${reservationJobLabel(reservation)} a la etapa «${next.label}».`, () => applyOperationState(reservationId, next.key), next.action || "Confirmar");
+    return;
+  }
   applyOperationState(reservationId, next.key);
 }
 
@@ -3055,6 +3084,7 @@ function applyOperationState(reservationId, operationKey) {
   const now = new Date().toISOString();
   reservation.operationStatus = next.key;
   reservation.operationUpdatedAt = now;
+  reservation.updatedAt = now;
   reservation.operationEvents = [...(reservation.operationEvents || []), { status: next.key, label: next.label, createdAt: now }];
   if (!reservation.firstResponseAt) reservation.firstResponseAt = now;
   if (next.key === "accepted") {
@@ -3076,6 +3106,7 @@ function applyOperationState(reservationId, operationKey) {
   renderReservations();
   renderMisOfertas();
   updateBadges();
+  refreshPendingCenter();
   showOperationUndoToast("Estado actualizado correctamente.", () => restoreOperationSnapshot(previous));
 }
 
@@ -3871,7 +3902,7 @@ function markAvailabilitySlotPartiallyBooked(machineId) {
 /* RESERVAS */
 
 function bindReservationsListActions() {
-  [$("#reservations-list"), $("#reservation-detail-content")].filter(Boolean).forEach((container) => container.addEventListener("click", (event) => {
+  [$("#reservations-list"), $("#reservation-detail-content"), $("#pending-center-list")].filter(Boolean).forEach((container) => container.addEventListener("click", (event) => {
     const opener = event.target.closest("[data-open-reservation-detail]");
     if (opener) { openReservationDetail(opener.dataset.reservationId, opener.dataset.detailContext); return; }
     const button = event.target.closest("button");
@@ -3881,7 +3912,7 @@ function bindReservationsListActions() {
       if (machine) openPublishForMachine(machine, button.matches(".offer-edit-btn"));
       return;
     }
-    if (container.id === "reservation-detail-content" && container.dataset.detailContext === "offer-request") return;
+    if (["reservation-detail-content", "pending-center-list"].includes(container.id) && container.dataset.detailContext === "offer-request") return;
     if (container.id === "reservation-detail-content") closeReservationDetail();
 
     if (button.matches(".accept-reservation")) {
@@ -4008,6 +4039,161 @@ function reservationNeedsAction(reservation) {
   return !requestedByCurrentUser;
 }
 
+function actionablePendingItems() {
+  const items = [];
+  for (const reservation of state.reservations) {
+    const isRequester = activeUserRequestedReservation(reservation);
+    const isOwner = activeUserOwnsReservationMachine(reservation);
+    const reschedule = pendingRescheduleFor(reservation.id);
+    const rescheduleRequestedByCurrentUser = Boolean(reschedule && (
+      clean(reschedule.requestedBy) === currentUserId()
+      || clean(reschedule.requestedByName) === currentUserLabel()
+    ));
+    const action = pendingActionForReservation(reservation, {
+      isRequester,
+      isOwner,
+      pendingReschedule: reschedule,
+      rescheduleRequestedByCurrentUser,
+    });
+    if (!action) continue;
+    const machine = findMachine(reservation.machineId);
+    const counterpart = isRequester ? reservationContractorLabel(reservation) : reservationRequesterLabel(reservation);
+    items.push({
+      id: String(reservation.id), reservation,
+      category: isRequester ? "initiated" : "received",
+      action, counterpart,
+      updatedAt: reservation.updatedAt || reservation.operationUpdatedAt || reservation.statusChangedAt || reservation.firstResponseAt || reschedule?.createdAt || reservation.scheduleProposal?.createdAt || reservation.createdAt,
+      createdAt: reservation.createdAt,
+      machineTitle: clean(reservation.machineTitle || machine?.title),
+      statusLabel: reservationStatusLabelForCurrentUser(reservation, isRequester),
+    });
+  }
+  return sortPendingItems(items);
+}
+
+function initializePendingCenter() {
+  const dialog = $("#pending-center-modal");
+  if (!dialog) return;
+  $("#pending-prev")?.addEventListener("click", () => navigatePending(-1));
+  $("#pending-next")?.addEventListener("click", () => navigatePending(1));
+  $("#pending-later")?.addEventListener("click", closePendingCenter);
+  $("#pending-center-list")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-pending-close]")) {
+      closePendingCenter();
+      return;
+    }
+    const action = event.target.closest("[data-pending-action]");
+    if (action) {
+      if (action.dataset.pendingAction === "advance") advanceOperationState(action.dataset.reservationId);
+      if (action.dataset.pendingAction === "delay") openDelayModal(action.dataset.reservationId);
+      return;
+    }
+    const button = event.target.closest("[data-pending-reservation]");
+    if (!button) return;
+    const id = button.dataset.pendingReservation;
+    closePendingCenter({ remember: false });
+    pendingDetailReturn = true;
+    openReservationDetail(id, button.dataset.pendingContext || "reservation");
+  });
+  dialog.addEventListener("click", (event) => { if (event.target === dialog) closePendingCenter(); });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !dialog.hidden) closePendingCenter();
+    if (!dialog.hidden && event.key === "ArrowLeft") navigatePending(-1);
+    if (!dialog.hidden && event.key === "ArrowRight") navigatePending(1);
+  });
+  refreshPendingCenter({ initial: true });
+  window.addEventListener("storage", (event) => {
+    if (event.key === STORAGE_KEYS.reservations) state.reservations = readJSON(STORAGE_KEYS.reservations, []);
+    if (event.key === STORAGE_KEYS.reschedules) state.rescheduleRequests = readJSON(STORAGE_KEYS.reschedules, []);
+    if (event.key === STORAGE_KEYS.reviews) state.reviews = readJSON(STORAGE_KEYS.reviews, []);
+    if (!event.key || [STORAGE_KEYS.reservations, STORAGE_KEYS.reschedules, STORAGE_KEYS.reviews].includes(event.key)) refreshPendingCenter();
+  });
+  pendingMonitorTimer = window.setInterval(() => refreshPendingCenter(), 30000);
+}
+
+function pendingDismissalKey() {
+  return `nexudrive_pending_dismissed_${currentUserId()}`;
+}
+
+function refreshPendingCenter({ initial = false } = {}) {
+  if (knownPendingUserId && knownPendingUserId !== currentUserId()) {
+    knownPendingIds = new Set();
+    pendingMonitorStarted = false;
+  }
+  knownPendingUserId = currentUserId();
+  const items = actionablePendingItems();
+  renderPendingCenter(items);
+  const ids = new Set(items.map((item) => item.id));
+  const newlyAdded = [...ids].filter((id) => !knownPendingIds.has(id));
+  if (!pendingMonitorStarted) {
+    pendingMonitorStarted = true;
+    knownPendingIds = ids;
+    if (initial && items.length && !sessionStorage.getItem(pendingDismissalKey())) openPendingCenter();
+  } else if (newlyAdded.length) {
+    knownPendingIds = ids;
+    if (!$("#pending-center-modal").hidden) renderPendingCenter(items);
+    else showToast(newlyAdded.length === 1 ? "Tenés un nuevo pendiente para revisar." : `Tenés ${newlyAdded.length} nuevos pendientes para revisar.`);
+  } else knownPendingIds = ids;
+}
+
+function renderPendingCenter(items = actionablePendingItems()) {
+  const list = $("#pending-center-list");
+  if (!list) return;
+  const previousId = pendingCenterItems[pendingActiveIndex]?.id;
+  pendingCenterItems = items;
+  const preservedIndex = items.findIndex((item) => item.id === previousId);
+  pendingActiveIndex = preservedIndex >= 0 ? preservedIndex : Math.min(pendingActiveIndex, Math.max(0, items.length - 1));
+  $("#pending-center-modal")?.classList.toggle("has-multiple-pending", items.length > 1);
+  $("#pending-position").textContent = `${items.length ? pendingActiveIndex + 1 : 0} de ${items.length}`;
+  $("#pending-prev").disabled = pendingActiveIndex <= 0;
+  $("#pending-next").disabled = pendingActiveIndex >= items.length - 1;
+  if (!items.length) {
+    list.innerHTML = '<div class="pending-empty"><i class="fa-solid fa-circle-check"></i><strong>Estás al día</strong><span>No hay solicitudes que requieran una acción tuya.</span></div>';
+    return;
+  }
+
+  const active = items[pendingActiveIndex];
+  const laterItems = items.slice(pendingActiveIndex + 1, pendingActiveIndex + 4).reverse();
+  const reservation = active.reservation;
+  const detail = active.category === "received"
+    ? solicitudDetailMarkup(reservation)
+    : reservationDetailMarkup(reservation, "reservation");
+  list.dataset.detailContext = active.category === "received" ? "offer-request" : "reservation";
+  const directionLabel = active.category === "received" ? "Solicitud recibida" : "Solicitud que iniciaste";
+  list.innerHTML = `<div class="pending-stack" data-direction="idle">${laterItems.map((_, index) => `<div class="pending-stack-back pending-decision-back" aria-hidden="true" style="--stack-index:${index + 1}"></div>`).join("")}<article class="pending-decision-window"><div class="pending-decision-context"><span>${directionLabel}</span><strong>${escapeHTML(active.counterpart)} · ${escapeHTML(reservationJobLabel(reservation))}</strong></div>${detail}</article></div>`;
+}
+
+function navigatePending(direction) {
+  const nextIndex = pendingActiveIndex + direction;
+  if (pendingNavigationLock || nextIndex < 0 || nextIndex >= pendingCenterItems.length) return;
+  pendingNavigationLock = true;
+  const stack = $(".pending-stack");
+  stack?.classList.add(direction > 0 ? "pending-leave-next" : "pending-leave-prev");
+  window.setTimeout(() => {
+    pendingActiveIndex = nextIndex;
+    pendingNavigationLock = false;
+    renderPendingCenter(pendingCenterItems);
+    $(".pending-stack")?.classList.add(direction > 0 ? "pending-enter-next" : "pending-enter-prev");
+    window.setTimeout(() => $(".pending-stack")?.classList.remove("pending-enter-next", "pending-enter-prev"), 260);
+  }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 220);
+}
+
+function openPendingCenter() {
+  refreshPendingCenter();
+  const dialog = $("#pending-center-modal");
+  dialog.hidden = false;
+  document.body.classList.add("modal-open");
+  $("#pending-center-modal .pending-center-modal")?.focus();
+}
+
+function closePendingCenter({ remember = true } = {}) {
+  const dialog = $("#pending-center-modal");
+  if (!dialog) return;
+  dialog.hidden = true;
+  if (!["reservation-detail-modal", "offer-detail-modal"].some((id) => !$("#" + id).hidden)) document.body.classList.remove("modal-open");
+  if (remember) sessionStorage.setItem(pendingDismissalKey(), new Date().toISOString());
+}
+
 function isReservationFinished(reservation) {
   return ["done", "rejected", "cancelled"].includes(reservation?.status);
 }
@@ -4057,7 +4243,15 @@ function openReservationDetail(reservationId, detailContext = "reservation") {
   document.body.classList.add("modal-open");
 }
 
-function closeReservationDetail() { $("#reservation-detail-modal").hidden = true; document.body.classList.remove("modal-open"); }
+function closeReservationDetail() {
+  $("#reservation-detail-modal").hidden = true;
+  document.body.classList.remove("modal-open");
+  if (pendingDetailReturn) {
+    pendingDetailReturn = false;
+    refreshPendingCenter();
+    openPendingCenter();
+  }
+}
 
 function reservationDetailMarkup(reservation, detailContext = "reservation") {
   const sentByActiveUser = activeUserRequestedReservation(reservation);
@@ -4590,6 +4784,7 @@ function submitScheduleCounterProposal(event) {
   };
   reservation.status = "schedule_counter";
   reservation.firstResponseAt = reservation.firstResponseAt || new Date().toISOString();
+  reservation.updatedAt = reservation.firstResponseAt;
   saveReservations();
   emitAppEvent("schedule.proposed", { reservation });
   closeScheduleCounterModal();
@@ -4612,6 +4807,7 @@ function acceptScheduleCounter(reservationId) {
   reservation.acceptedAt = reservation.acceptedAt || now;
   reservation.wasAccepted = true;
   reservation.resolvedAt = now;
+  reservation.updatedAt = now;
   markAvailabilitySlotPartiallyBooked(reservation.machineId);
   saveReservations();
   emitAppEvent("schedule.accepted", { reservation });
@@ -4627,6 +4823,7 @@ function keepOriginalSchedule(reservationId) {
   reservation.scheduleProposal.status = "original_kept";
   reservation.status = "original_kept";
   reservation.firstResponseAt = reservation.firstResponseAt || new Date().toISOString();
+  reservation.updatedAt = reservation.firstResponseAt;
   saveReservations();
   emitAppEvent("schedule.original_kept", { reservation });
   renderReservations();
@@ -4644,6 +4841,7 @@ function cancelScheduleRequest(reservationId) {
   reservation.statusChangedBy = currentUserId();
   reservation.statusChangedByName = currentUserLabel();
   reservation.statusChangedAt = now;
+  reservation.updatedAt = now;
   reservation.firstResponseAt = reservation.firstResponseAt || now;
   reservation.resolvedAt = now;
   saveReservations();
@@ -5106,6 +5304,7 @@ function acceptRescheduleRequest(id) {
   reservation.endTime = request.proposedEndTime || request.proposedStartTime || "";
   if (reservation.status === "pending") reservation.status = "accepted";
   reservation.rescheduledAt = request.resolvedAt;
+  reservation.updatedAt = request.resolvedAt;
   saveReservations();
   saveRescheduleRequests();
   renderReservations();
@@ -5379,6 +5578,7 @@ function setReservationStatus(id, status) {
   }
   if (["cancelled", "rejected"].includes(status) && (res.acceptedAt || res.startedAt)) res.wasAccepted = true;
   res.status = status;
+  res.updatedAt = now;
   res.resolvedAt = now;
   if (status === "accepted") markAvailabilitySlotPartiallyBooked(res.machineId);
   saveReservations();
@@ -5411,10 +5611,8 @@ function openRequestModal(machineId) {
   toggleJobOther(form);
   formControl(form, "machineId").value = machine.id;
   syncRequestMode(form, machine);
-  formControl(form, "date").min = new Date().toISOString().slice(0, 10);
   formControl(form, "startTime").value = "";
   formControl(form, "endTime").value = "";
-  formControl(form, "dateEnd").min = formControl(form, "date").min;
   syncRequestDateRange(form);
   updateRequestEstimate(form);
   setRequestStep(form, 1);
@@ -5450,6 +5648,24 @@ function advanceRequestStep(form) {
   if (invalid) {
     showRequestError("Completá los datos requeridos para continuar.");
     invalid.focus();
+    return;
+  }
+  if (step === 1) {
+    const dateValidation = validateRequestDates(form);
+    if (!dateValidation.valid) {
+      showRequestError(dateValidation.message);
+      formControl(form, dateValidation.field || "date")?.focus();
+      return;
+    }
+  }
+  if (step === 2 && form.dataset.requestMode === "truck" && !getTransportLocation(form, "destination")) {
+    showRequestError("Marcá la ubicación exacta del destino en el mapa.");
+    form.querySelector('[data-location-target="destination"]')?.focus();
+    return;
+  }
+  if (step === 3 && form.dataset.requestMode !== "truck" && !getRequestLocation(form)) {
+    showRequestError("Marcá la ubicación exacta del lote en el mapa para continuar.");
+    $("#request-location-picker")?.focus();
     return;
   }
   setRequestStep(form, step + 1);
@@ -5584,7 +5800,9 @@ function syncRequestMode(form, machine) {
   toggleField("#request-transport-fields", config.showTransport);
 
   $("#request-date-label").textContent = config.dateLabel;
-  $("#request-location-label").textContent = config.locationLabel;
+  $("#request-location-label").textContent = config.showLocation
+    ? "Ubicación del lote · obligatoria"
+    : config.locationLabel;
   $("#request-tons-label").textContent = config.tonsLabel;
   const kmInput = formControl(form, "estimatedKm");
   const kmHelp = $("#request-km-help");
@@ -5947,11 +6165,10 @@ function updateOperationCircle(center = locationPickerState.operationCenter || p
 function locationRadiusInfoMarkup(location) {
   const info = locationRadiusInfo(location);
   if (!info) {
-    return `<strong id="location-selected-address">${escapeHTML(location.address || "Ubicacion seleccionada")}</strong>`;
+    return `<span class="location-picked-label">Punto marcado en el mapa</span>`;
   }
   return `
-    <strong id="location-selected-address">${escapeHTML(location.address || "Ubicacion seleccionada")}</strong>
-    <div class="location-radius-summary ${info.inside ? "inside" : "outside"}">
+    <div class="location-radius-summary ${info.inside ? "inside" : "outside"}" aria-label="Resumen respecto a tu zona operativa">
       <span><i class="fa-solid fa-route"></i>${info.distanceLabel}</span>
       <span class="location-radius-status"><i class="fa-solid ${info.inside ? "fa-circle-check" : "fa-circle-exclamation"}"></i>${info.inside ? "Dentro del radio" : `Fuera del radio (${info.radiusLabel})`}</span>
       <span><i class="fa-regular fa-clock"></i>${info.timeLabel}</span>
@@ -5968,7 +6185,7 @@ function locationRadiusInfo(location) {
   const travelMinutes = estimatedTravelMinutes(distance);
   return {
     inside,
-    distanceLabel: `${formatKm(distance)} km`,
+    distanceLabel: `${formatKm(distance)} km desde tu zona`,
     radiusLabel: `${radius} km`,
     timeLabel: travelMinutes ? `${formatDurationMinutes(travelMinutes)} aprox.` : "No disponible",
     statusLabel: inside ? "Dentro de tu radio de operacion" : "Fuera de tu radio de operacion",
@@ -6330,11 +6547,42 @@ function toggleJobOther(form) {
 }
 
 function syncRequestDateRange(form) {
-  const dateStart = formControl(form, "date").value;
+  const startInput = formControl(form, "date");
   const dateEnd = formControl(form, "dateEnd");
-  if (!dateEnd) return;
-  dateEnd.min = dateStart;
-  if (dateEnd.value && dateStart && dateEnd.value < dateStart) dateEnd.value = "";
+  if (!startInput || !dateEnd) return;
+  const limits = requestDateLimits();
+  startInput.min = limits.min;
+  startInput.max = limits.max;
+  const startIsWithinLimit = startInput.value >= limits.min && startInput.value <= limits.max;
+  dateEnd.min = startIsWithinLimit ? startInput.value : limits.min;
+  dateEnd.max = limits.max;
+  if (dateEnd.value && (dateEnd.value < dateEnd.min || dateEnd.value > limits.max)) dateEnd.value = "";
+}
+
+function requestDateLimits() {
+  const today = new Date();
+  const currentDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const lastAllowedDay = new Date(currentDay);
+  lastAllowedDay.setFullYear(lastAllowedDay.getFullYear() + 5);
+  const toDateInputValue = (date) => date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+  return { min: toDateInputValue(currentDay), max: toDateInputValue(lastAllowedDay) };
+}
+
+function validateRequestDates(form) {
+  syncRequestDateRange(form);
+  const date = clean(formControl(form, "date").value);
+  const limits = requestDateLimits();
+  if (!date) return { valid: false, message: "Elegí una fecha para el trabajo.", field: "date" };
+  if (date < limits.min || date > limits.max) return { valid: false, message: "Elegí una fecha desde hoy y dentro de los próximos 5 años.", field: "date" };
+  const dateEnd = clean(formControl(form, "dateEnd").value);
+  if (dateEnd && dateEnd < date) return { valid: false, message: "La fecha límite no puede ser anterior al inicio estimado.", field: "dateEnd" };
+  if (dateEnd && dateEnd > limits.max) return { valid: false, message: "La fecha límite no puede superar los próximos 5 años.", field: "dateEnd" };
+
+  const startTime = clean(formControl(form, "startTime").value);
+  const endTime = clean(formControl(form, "endTime").value);
+  if (!startTime) return { valid: false, message: "Elegí una hora de inicio.", field: "startTime" };
+  if (endTime && endTime <= startTime) return { valid: false, message: "La hora estimada de finalización debe ser posterior al inicio.", field: "endTime" };
+  return { valid: true, message: "" };
 }
 
 function updateRequestEstimate(form) {
@@ -6384,13 +6632,8 @@ const requestValidators = {
 function validateRequestForm(form) {
   const mode = form.dataset.requestMode || "default";
   toggleJobOther(form);
-  syncRequestDateRange(form);
-
-  if (!formControl(form, "date").value) return { valid: false, message: "Elegi una fecha para el trabajo." };
-  const startTime = clean(formControl(form, "startTime").value);
-  const endTime = clean(formControl(form, "endTime").value);
-  if (!startTime) return { valid: false, message: "Elegi una hora de inicio." };
-  if (endTime && endTime <= startTime) return { valid: false, message: "La hora estimada de finalizacion debe ser posterior al inicio." };
+  const dateValidation = validateRequestDates(form);
+  if (!dateValidation.valid) return dateValidation;
 
   const validateVisibleFields = requestValidators[mode] || requestValidators.default;
   const visibleResult = validateVisibleFields(form);
@@ -6401,6 +6644,7 @@ function validateRequestForm(form) {
 function validateTruckRequest(form) {
   if (!clean(formControl(form, "origin").value)) return { valid: false, message: "Indica el origen del viaje." };
   if (!clean(formControl(form, "destination").value)) return { valid: false, message: "Indica el destino del viaje." };
+  if (!getTransportLocation(form, "destination")) return { valid: false, message: "Marca la ubicación exacta del destino en el mapa." };
   if (!clean(formControl(form, "cargoType").value)) return { valid: false, message: "Indica el tipo de carga." };
   return { valid: true, message: "" };
 }
@@ -6787,8 +7031,14 @@ function openNotificationDetail(id) {
   renderNotifications();
   updateBadges();
   if (["job_request", "job_accepted", "job_cancelled", "review"].includes(notification.type)) {
-    if (notification.type === "job_request") state.offersTab = "solicitudes";
-    showScreen(notification.type === "job_request" ? "mis-ofertas" : "reservas");
+    const reservation = state.reservations.find((item) => String(item.id) === String(notification.related_id));
+    state.reservationDirection = notification.type === "job_request" || (reservation && !activeUserRequestedReservation(reservation))
+      ? "received"
+      : "my-requests";
+    if (["job_request", "job_accepted"].includes(notification.type)) state.reservationsTab = "in-progress";
+    if (notification.type === "job_cancelled") state.reservationsTab = "cancelled";
+    if (notification.type === "review") state.reservationsTab = "finished";
+    showScreen("reservas");
   }
   closeNotificationCenter();
   const toast = $("#notification-toast");
@@ -6909,15 +7159,10 @@ function timeAgo(value) {
 }
 
 function updateBadges() {
-  const pendingAsContractor = state.reservations.filter((reservation) => activeUserOwnsReservationMachine(reservation) && isContractorNegotiationStatus(reservation)).length;
   const pendingVisible = state.reservations.filter((reservation) => visibleReservationForActiveUser(reservation) && isContractorNegotiationStatus(reservation)).length;
   const badge = $("#reservation-badge");
   badge.hidden = pendingVisible === 0;
   badge.textContent = pendingVisible;
-
-  const offersBadge = $("#offers-badge");
-  offersBadge.hidden = pendingAsContractor === 0;
-  offersBadge.textContent = pendingAsContractor;
 
   const notificationCount = unreadNotificationsCount();
   const notificationBadge = $("#notification-badge");
@@ -6925,6 +7170,7 @@ function updateBadges() {
     notificationBadge.hidden = notificationCount === 0;
     notificationBadge.textContent = notificationCount > 9 ? "9+" : notificationCount;
   }
+  if (pendingMonitorStarted) refreshPendingCenter();
 }
 
 function saveMachines() {
