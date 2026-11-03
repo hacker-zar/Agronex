@@ -2540,7 +2540,6 @@ label { display: flex; flex-direction: column; gap: 5px; font-weight: 700; font-
   line-height: 1.28;
 }
 
-.search-box input,
 label input,
 label select,
 label textarea {
@@ -3012,6 +3011,9 @@ label input:focus, label select:focus, label textarea:focus {
   animation: fadeIn .22s ease both;
   backdrop-filter: blur(3px);
 }
+
+#confirm-modal,
+#schedule-counter-modal { z-index: 100; }
 
 .modal {
   width: min(560px, 100%);
@@ -5774,7 +5776,6 @@ label textarea:focus {
   label input,
   label select,
   label textarea,
-  .search-box input,
   .location-search input {
     min-height: 52px;
     border-radius: 14px;
