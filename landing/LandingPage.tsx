@@ -6,6 +6,7 @@ import {
   Compass,
   Truck,
 } from "lucide-react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import { CapacityPreview } from "./components/CapacityPreview";
 import { EcosystemList } from "./components/EcosystemList";
 import { HeroVisual } from "./components/HeroVisual";
@@ -138,6 +139,7 @@ export default function LandingPage() {
         </section>
       </main>
       <Footer />
+      <SpeedInsights />
     </div>
   );
 }
