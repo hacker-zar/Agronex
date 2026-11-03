@@ -1,5 +1,7 @@
 "use strict";
 
+import { inject } from "@vercel/analytics";
+import { injectSpeedInsights } from "@vercel/speed-insights";
 import { storageService } from "./services/storageService.js";
 import {
   defaultCatalogFilters,
@@ -30,6 +32,11 @@ import {
   escapeHTML,
   money,
 } from "./modules/ui.js";
+
+if (import.meta.env.PROD) {
+  inject({ mode: "production" });
+  injectSpeedInsights();
+}
 
 const TERMS_VERSION = "1.0";
 const TERMS_EFFECTIVE_DATE = "2026-06-11";
