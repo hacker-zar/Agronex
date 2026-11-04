@@ -75,8 +75,8 @@ export default function LandingPage() {
           <div className="hero-inner">
             <div className="hero-copy">
               <SectionEyebrow light>Una plataforma para el agro argentino</SectionEyebrow>
-              <h1>Menos incertidumbre,<br /><span>más crecimiento.</span></h1>
-              <p className="hero-description">Agronex conecta capacidades, recursos y servicios para que el agro pueda coordinarse mejor.</p>
+`              <h1>Agronex: plataforma AgTech para el agro argentino.<br /><span>Menos incertidumbre, más crecimiento.</span></h1>
+              <p className="hero-description">Conectamos productores, contratistas y cooperativas para coordinar maquinaria, transporte y servicios agropecuarios.</p>
               <div className="hero-actions">
                 <a className="button button-lime" href="/">Explorar Agronex <ArrowUpRight size={17} /></a>
                 <a className="button button-quiet" href="#nexudrive">Conocer NexuDrive <ArrowDown size={15} /></a>
