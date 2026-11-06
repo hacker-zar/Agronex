@@ -1,0 +1,12 @@
+export const machineryCategories = ["Camion", "Tractor", "Sembradora", "Pulverizadora", "Cosechadora", "Embolsadora", "Dron", "Otros", "Fertilizadora", "Extractora", "Acoplado", "Tolva"] as const;
+export const priceUnits = ["hectarea", "tonelada", "bolsa", "viaje", "kilometro", "tonelada_kilometro", "hora", "dia", "fijo"] as const;
+export const reservationStatuses = ["pending", "schedule_counter", "original_kept", "accepted", "working", "done", "rejected", "cancelled"] as const;
+export const operationStages = ["accepted", "on_way_origin", "arrived_origin", "loading", "loaded", "in_transit_destination", "arrived_destination", "unloading", "unloaded", "done", "on_way_field", "arrived_field", "working_field", "setup", "planting", "spraying", "mixing", "harvesting", "wrapping_up"] as const;
+export const delayTypes = ["start", "execution", "end"] as const;
+export const reviewInsertColumns = ["reservation_id", "rating", "category_ratings", "would_work_again", "tags", "comment"] as const;
+export const incidentInsertColumns = ["reservation_id", "reason", "delay_type", "delay_minutes", "reported_by"] as const;
+export type MachineryCategory = (typeof machineryCategories)[number];
+export type PriceUnit = (typeof priceUnits)[number];
+export type ReservationStatus = (typeof reservationStatuses)[number];
+export type OperationStage = (typeof operationStages)[number];
+export type DelayType = (typeof delayTypes)[number];
