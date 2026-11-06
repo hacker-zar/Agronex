@@ -4,7 +4,7 @@
 -- Un solo archivo. Se corre UNA vez, completo, en el SQL Editor de una base vacía.
 -- Reemplaza a las migraciones anteriores (01_enums, 02_migracion, 03_coordenadas).
 -- v2: categorías completas (12), reseñas con puntajes por aspecto y "volvería a trabajar",
---     ubicación en vivo del trabajo (reservation_locations).
+--     ubicación en vivo del trabajo (reservation_locations), demoras con tipo y minutos (incidents).
 --
 -- Qué crea:
 --   * 12 tablas: profiles, machinery, availability_windows, reservations,
@@ -297,9 +297,17 @@ create table public.reservation_schedule_proposals (
 create table public.incidents (
   id             uuid primary key default gen_random_uuid(),
   reservation_id uuid not null references public.reservations(id) on delete cascade,
-  reason         text not null check (char_length(reason) between 1 and 300),
+  reason         text not null default '',
+  -- Si es una demora: cuándo ocurre (inicio / ejecución / final) y cuántos minutos.
+  -- Sin estos dos campos es un incidente común (ruta cortada, problema mecánico, etc.).
+  delay_type     text check (delay_type is null or delay_type in ('start', 'execution', 'end')),
+  delay_minutes  integer check (delay_minutes is null or delay_minutes between 1 and 1440),
   reported_by    uuid not null references public.profiles(id),
-  created_at     timestamptz not null default now()
+  created_at     timestamptz not null default now(),
+  constraint incidents_reason_check check (
+    char_length(reason) <= 300 and (char_length(reason) >= 1 or delay_minutes is not null)
+  ),
+  constraint incidents_delay_pair check ((delay_type is null) = (delay_minutes is null))
 );
 
 -- 1.9 Reseñas (solo sobre trabajos finalizados)
@@ -567,11 +575,26 @@ as $$
 declare
   r public.reservations;
   v_other uuid;
+  v_title text;
+  v_body text;
 begin
   select * into r from public.reservations where id = new.reservation_id;
   v_other := case when new.reported_by = r.owner_id then r.requester_id else r.owner_id end;
+
+  if new.delay_minutes is not null then
+    v_title := 'Demora reportada';
+    v_body := 'Demora de ' || new.delay_minutes || ' min'
+              || case new.delay_type when 'start' then ' al inicio'
+                                     when 'execution' then ' durante el trabajo'
+                                     else ' al final' end
+              || case when new.reason <> '' then ': ' || new.reason else '' end;
+  else
+    v_title := 'Incidente reportado';
+    v_body := new.reason;
+  end if;
+
   insert into public.notifications (user_id, type, title, body, priority, related_id)
-  values (v_other, 'system', 'Incidente reportado', new.reason, 'HIGH', r.id);
+  values (v_other, 'system', v_title, v_body, 'HIGH', r.id);
   return new;
 end $$;
 
@@ -1137,7 +1160,8 @@ create policy proposals_select on public.reservation_schedule_proposals for sele
 
 -- 4.6 incidents: las partes los ven y los reportan
 grant select on public.incidents to authenticated;
-grant insert (reservation_id, reason, reported_by) on public.incidents to authenticated;
+grant insert (reservation_id, reason, delay_type, delay_minutes, reported_by)
+  on public.incidents to authenticated;
 
 create policy incidents_select on public.incidents for select to authenticated
   using (public.is_reservation_party(reservation_id));
