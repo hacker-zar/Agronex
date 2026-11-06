@@ -6,9 +6,9 @@
 
 ## 1. Alcance, fuentes y bloqueos
 
-Se inspeccionaron `index.html`, `js/app.js` (7.426 líneas), `styles.css`, `js/modules/*`, `js/services/*`, `auth.js`, `supabaseClient.js`, `public/sw.js`, `test/domain.test.js`, `PRODUCT_VISION.md` y `ARCHITECTURE.md`.
+Se inspeccionaron `index.html`, `js/app.js` (7.426 líneas), `styles.css`, `js/modules/*`, `js/services/*`, `auth.js`, `supabaseClient.js`, `public/sw.js`, `test/`, `PRODUCT_VISION.md`, `ARCHITECTURE.md`, `supabase/README.md` y `supabase/schema.sql` v2.1.
 
-**Bloqueo del contrato Supabase:** no existen `supabase/README.md`, `supabase/schema.sql` ni archivos dentro de `supabase/` en esta rama. Por lo tanto, no se pueden confirmar columnas, tipos, CHECK, GRANT, RLS, triggers ni firmas de funciones. La tabla de mapeo más abajo separa lo observado en el cliente de cualquier propuesta tentativa. No inferir ni desplegar cambios de esquema hasta obtener el contrato que administra el usuario.
+**Contrato Supabase confirmado:** `supabase/schema.sql` es el contrato único de la base. Confirma columnas, CHECK, GRANT por columna, RLS, trigger de perfil y firmas de RPC. La capa de datos debe mantenerse alineada con ese archivo mediante el test de contrato; no se edita a mano desde la reescritura.
 
 **Desfase respecto del contexto de migración:** la aplicación operativa de la raíz inicia `js/app.js` desde `index.html` y persiste el dominio funcional en `localStorage`. `auth.js` y `supabaseClient.js` contienen integración real/prototipo con Supabase, pero no están referenciados por `index.html` ni importados por `js/app.js`; tampoco se hallaron referencias a `AgronexDB` desde la aplicación. La app que se usa como especificación funcional no opera hoy contra Supabase.
 
@@ -109,9 +109,9 @@ No todos ameritan una ruta propia. Mantenerlos como Client Components accionados
 
 ### 3.6 Auth, perfiles y validaciones
 
-- UI de registro solicita nombre, apellido, email, rango de hectáreas, tipo y contraseña; contraseña mínima 8. Términos versión `1.0`; la instrucción de migración pide registrar versión en metadata del signUp.
+- El formulario operativo `#auth-form` solicita nombre, email, contraseña y aceptación de términos; contraseña mínima 8. Términos versión `1.0`; el registro envía nombre y versión en metadata del signUp.
 - Login email/contraseña; confirmación de correo condiciona que haya sesión; logout. Errores de autenticación se traducen a mensajes en español.
-- `auth.js` hace Supabase signUp/signIn/signOut y lectura/actualización de `profiles`; datos personales incluyen nombre, apellido, hectáreas y tipo. Referencias a columnas legacy (`nombre`, `apellido`, `ha`, `tipo`, `onboarding_completado`) no equivalen a contrato confirmado.
+- `auth.js` contiene un flujo legado no cargado por `index.html`; sus referencias a nombre, apellido, hectáreas y tipo no definen la paridad de la app operativa.
 - Identidad productiva debe ser UUID de `auth.users`; no email ni nombre visible. IDs `dev-*`, perfiles/usuarios de prueba y seeds son solo fixtures de desarrollo y no migran a producción.
 - Perfil operativo: nombre, zona, ubicación base y coordenadas, cobertura/hectáreas, radio (10–500 km en pasos de 5), biografía (hasta 220) y tema.
 - Validaciones adicionales: título/categoría/equipo, unidad válida por categoría, cantidades positivas, fecha/horarios ordenados, calificaciones 1–5, un reporte/reprogramación según estado. Consultar el código completo de cada submit al implementar cada fase.
@@ -157,7 +157,7 @@ No todos ameritan una ruta propia. Mantenerlos como Client Components accionados
 | `nexudrive_mvp_reservations` (`state.reservations`) | `reservations`: `id`, `machinery_id`, `requester_id`, `owner_id`, `status`, snapshots `machine_title`/`owner_name`/`requester_name`/`category`, `price_unit`, `unit_price`, fechas/horas/flexibilidad, `job_type`, `job_other`, `urgency`, `hectares`, `quantity`, `estimated_km`, `estimated_value`, `cargo_type`, ubicación de campo/origen/destino y sus coordenadas, `details`, `operation_stage`, `operation_updated_at`, `resolved_at`, timestamps | Inserción limitada por GRANT; servidor completa dueño, snapshots, estado inicial e historial. RLS limita lectura a las partes. `details` guarda extras tipados de cultivo, grano, notas, condiciones y cantidades auxiliares. No hay GRANT UPDATE de reservas. |
 | Estado/etapas/historial dentro de reserva | `reservations.operation_stage`/`operation_updated_at`; `reservation_events(status,note,created_at)`; `reservation_operation_events(stage,label,created_at)` | Actualizaciones por `transition_reservation` y `set_operation_stage`; estas escriben historia y notificaciones. La RPC de etapa no valida el orden (ver brecha). |
 | `nexudrive_mvp_reschedules` (`state.rescheduleRequests`) | `reservation_schedule_proposals`: `id`, `reservation_id`, `kind`, `proposed_by`, `date_start`, `date_end`, `start_time`, `end_time`, `reason`, `status`, timestamps | `kind=counter` es contrapropuesta; `reschedule` es reprogramación. `propose_schedule` y `respond_schedule` verifican actor/estado, fecha y que no exista otra propuesta pendiente; la aceptación aplica fechas a la reserva. |
-| `nexudrive_mvp_delays` (`state.delayRecords`) | Parcial: `incidents(id,reservation_id,reason,reported_by,created_at)` | La app guarda `delayType`, `minutesDelayed` y `reason` en [js/app.js:4920](/Users/juaco/Developer/Agronex/js/app.js:4920); el formulario valida minutos positivos en [js/app.js:4915](/Users/juaco/Developer/Agronex/js/app.js:4915). El schema aún no tiene columnas para tipo estructurado ni minutos (brecha abierta). |
+| `nexudrive_mvp_delays` (`state.delayRecords`) | `incidents(id,reservation_id,reason,delay_type,delay_minutes,reported_by,created_at)` | La app guarda `delayType`, `minutesDelayed` y `reason` en [js/app.js:4920](/Users/juaco/Developer/Agronex/js/app.js:4920); v2.1 los cubre con tipo `start`/`execution`/`end` y minutos 1–1440. |
 | `nexudrive_mvp_reviews` (`state.reviews`) | `reviews(id,reservation_id,reviewer_id,reviewee_id,reviewer_role,rating,category_ratings,would_work_again,tags,comment,created_at)`; `machinery.would_work_again_pct` | Trigger fija contraparte y rol, limita reseña a reserva `done`; UNIQUE `(reservation_id, reviewer_id)` limita a una por parte. Trigger recalcula rating, conteo y porcentaje de recomendación. Categorías y recomendación cubiertas en v2. SQL permite 500 caracteres; interfaz puede seguir limitando a 300. |
 | Puntajes, estadísticas y badges de perfiles | Derivados de `reviews`, `reservations`, `reservation_events`, `reservation_operation_events` | No almacenar datos calculados desde cliente. Ratings categóricos y recomendación de volver a trabajar se guardan en `reviews`; porcentaje agregado lo calcula el servidor en `machinery.would_work_again_pct`. |
 | `nexudrive_mvp_notifications` (`state.notifications`) | `notifications(id,user_id,type,title,body,priority,read,related_id,created_at)` | Triggers/RPCs crean notificaciones; el cliente solo lee las propias y actualiza `read`. No insertar ni editar contenido/prioridad desde la app. |
@@ -174,16 +174,15 @@ No todos ameritan una ruta propia. Mantenerlos como Client Components accionados
 
 ### 6.1 Brechas del schema
 
-**Resueltas en v2:** categorías de maquinaria (12 valores), reseñas (ratings categóricos y `would_work_again`, con porcentaje agregado calculado por servidor) y GPS en vivo (`reservation_locations` más RPC `report_location`).
+**Resueltas en v2.1:** categorías de maquinaria (12 valores), reseñas (ratings categóricos y `would_work_again`, con porcentaje agregado calculado por servidor), GPS en vivo (`reservation_locations` más RPC `report_location`) y demoras con `delay_type`/`delay_minutes`.
 
 | Prioridad / estado | Brecha confirmada | Propuesta mínima |
 |---|---|---|
-| Alta | `incidents` persiste `reason`, pero no el tipo estructurado (`delayType`) ni los minutos (`minutesDelayed`) que registra la app. Evidencia: [js/app.js:4920](/Users/juaco/Developer/Agronex/js/app.js:4920) guarda ambos; [js/app.js:4915](/Users/juaco/Developer/Agronex/js/app.js:4915) valida minutos positivos. | Añadir `incident_type` y `delay_minutes` con CHECK de minutos positivos e incluirlos en el GRANT de inserción; conservar `reason`. |
 | Decisión: diferido | `set_operation_stage` valida rol, estado y valores permitidos, pero no la secuencia de etapas. El contratista avanza etapas de su propio trabajo; el riesgo es bajo para el MVP. | Diferir validación secuencial. Retomar si aparece abuso. |
 | Decisión de producto pendiente | `payment-demo-modal` sigue siendo una demo sin persistencia; `payments` existe, pero el cliente solo tiene lectura. | Definir el flujo de pago y cuándo persistirlo antes de habilitar escrituras; no hace falta agregar tabla ahora. |
-| Media | El registro legado separa nombre/apellido, pero `profiles` solo tiene `name`; el nuevo signUp manda `name`. | Definir si se combinan en `name`; si hay que conservarlos separados, agregar columnas y extender trigger/GRANT antes de implementar onboarding. |
+| Decisión: diferido | La reputación global y badges requieren leer reservas y eventos de terceros, que RLS no expone al perfil público. | En el primer corte mostrar solo reputación por oferta (`rating`, `reviews_count`, `would_work_again_pct`) y reseñas propias. Diferir puntaje global y badges hasta contar con un agregado server-side. |
 
-No son brechas: tablas de perfiles, ofertas, ventanas de disponibilidad, reservas, eventos, propuestas, incidentes, reseñas, notificaciones, pagos y ubicación; estados, categorías, unidades de precio, coordenadas con checks de pares/rangos, baja lógica, RPC requeridas, políticas RLS y GRANT por columna ya existen. No añadir UPDATE directo a reservas ni escrituras cliente de valores que decide el servidor.
+No son brechas: tablas de perfiles, ofertas, ventanas de disponibilidad, reservas, eventos, propuestas, incidentes y demoras, reseñas, notificaciones, pagos y ubicación; estados, categorías, unidades de precio, coordenadas con checks de pares/rangos, baja lógica, RPC requeridas, políticas RLS y GRANT por columna ya existen. No añadir UPDATE directo a reservas ni escrituras cliente de valores que decide el servidor.
 
 ## 7. Checklist de paridad manual (dos cuentas)
 
@@ -191,7 +190,7 @@ Preparación: usar una cuenta Productor (P) y una Contratista (C) con UUIDs dist
 
 ### Productor (P)
 
-- [ ] Registro con nombre/apellido/email, hectáreas/tipo, contraseña de 8+ caracteres y aceptación de términos 1.0; ver email de confirmación y entrar luego de confirmar.
+- [ ] Registro con nombre/email, contraseña de 8+ caracteres y aceptación de términos 1.0; ver email de confirmación y entrar luego de confirmar.
 - [ ] Login/logout, sesión tras recarga, acceso no autenticado a ruta protegida y retorno con mensaje español.
 - [ ] Completar perfil, zona/cobertura/radio/biografía; probar valores límite 10/500 km y persistencia del tema.
 - [ ] Buscar por texto y categoría; aplicar/limpiar filtros de disponibilidad, servicio, reputación, ubicación/radio, rango de precio, marca y potencia; ordenar por precio/disponibilidad/reputación; observar estado vacío.
@@ -201,7 +200,7 @@ Preparación: usar una cuenta Productor (P) y una Contratista (C) con UUIDs dist
 - [ ] Recibir cambios de estado/notificaciones; abrir detalle y comprobar cronología y datos de operación.
 - [ ] Proponer reprogramación con fechas/horas válidas e inválidas; una pendiente bloquea otra; confirmar que la fecha no cambia antes de respuesta.
 - [ ] Responder a contrapropuesta/horario original; aceptar actualiza fechas, rechazar mantiene original.
-- [ ] Seguir transporte y demás tipos de trabajo; verificar orden de etapas y que no se pueda saltar/cerrar indebidamente.
+- [ ] Seguir transporte y demás tipos de trabajo; la interfaz presenta el orden de etapas, mientras la base valida rol, estado y valores permitidos.
 - [ ] Recibir reportes de demora/incidentes y ver autor, minutos, motivo e historial; el reporte no cambia etapa/fecha.
 - [ ] Finalizada una operación, puntuar una vez al contratista: ratings 1–5 obligatorios, categorías de productor, tags, recomendación y comentario hasta 300; duplicado/edición rechazada.
 
@@ -272,7 +271,7 @@ Estimaciones relativas de pieza (S/M/L), no duración calendario:
 
 | Orden | Pieza | Tamaño | Dependencias y salida |
 |---:|---|:---:|---|
-| 0 | Obtener/leer `supabase/README.md` y `supabase/schema.sql`; aclarar ambiente de preview | S (bloqueante) | Confirmar tablas, columnas, GRANT/RLS y cuatro RPCs; sin esto, no se implementan datos ni transiciones |
+| 0 | Contrato Supabase v2.1 leído y cubierto por mappers/tests | S (resuelto) | Tablas, columnas, GRANT/RLS y RPC están confirmados; mantener el test de contrato en verde |
 | 1 | Fundación Next App Router, TypeScript strict, ESLint, Tailwind v4, Vitest, variables/fuentes/temas y componentes base | M | `web/` aislado; dependencias registradas en `web/DECISIONS.md` |
 | 2 | Supabase `@supabase/ssr`, cookies, auth callback, middleware y helpers Server/Browser | M | UUID Auth y pruebas de rutas protegidas; sin service role en app |
 | 3 | Portar funciones puras `src/domain/*` y los tests existentes sin cambiar expectativas | M | Precio, solicitudes, estados/pendientes, reputación, ubicación, UI |
@@ -287,20 +286,32 @@ Estimaciones relativas de pieza (S/M/L), no duración calendario:
 | 12 | Landing/SEO, sitemap, robots, canónicas, JSON-LD, rendimiento y accesibilidad | M | Contenido público con Server Components/generación estática; datos corporativos verificados |
 | 13 | Pruebas de paridad, revisión de dos cuentas y preview Vercel independiente (Root Directory `web`) | L | Solo se considera deployable al aprobar build/lint/tests y flujo principal |
 
+### Corte del 15 de diciembre (propuesta, pendiente de aprobación del usuario)
+
+| Pieza | Tamaño | Estado / bloqueo |
+|---|:---:|---|
+| Autenticación y perfil mínimo | M | Incluido; depende de SSR Supabase, callback y RLS. |
+| Catálogo público y detalle | L | Incluido; RLS permite ofertas activas y ventanas anónimas. |
+| Publicar, editar, pausar y dar de baja ofertas | L | Incluido; sin UI de ventanas de disponibilidad. |
+| Solicitud de cuatro pasos y selector de ubicación | L | Incluido; depende de módulo de geocoding reemplazable. |
+| Aceptar, rechazar, cancelar y etapas hasta finalizar | L | Incluido; depende de RPC. |
+| Demoras, incidentes, notificaciones por consulta y reseñas | L | Incluido; depende de tablas y permisos v2.1. |
+| Ventanas de disponibilidad, contrapropuesta y reprogramación | M | Diferido. |
+| GPS en vivo, perfiles públicos, badges y puntaje global | M | Diferido; reputación global necesita agregado server-side. |
+| Denuncias, Analytics, Speed Insights y landing Next | S | Diferido. |
+
 ## 10. Decisiones/datos que requieren confirmación
 
-1. **Bloqueante:** adjuntar o habilitar `supabase/README.md` y `supabase/schema.sql` administrados por el usuario, incluida la definición de RPCs y grants. No modificar el esquema desde esta migración.
-2. Confirmar si el catálogo es público o requiere login; el brief futuro nombra el catálogo público y detalle `/oferta/[id]`, mientras la app actual muestra el catálogo en raíz sin una ruta de acceso separada.
-3. Confirmar política de perfiles públicos (visibilidad, UUID/slug y qué campos publicar).
-4. Aclarar si las reglas/estados legacy `schedule_counter`, `original_kept` y los cinco flujos de etapas ya coinciden con el contrato SQL que debe ser autoridad.
-5. Confirmar el alcance de “pago confirmado”: el repositorio presenta un modal de demo, no se encontró integración real de pagos.
-6. Para ubicación: confirmar proveedor de geocoding permitido y política de datos/retención de ubicaciones GPS.
-7. Confirmar acceso a cuentas/entorno Supabase de preview cuando se llegue a las fases de implementación; no se requiere para este inventario.
+1. El contrato v2.1 ya está disponible; no es bloqueante y no se modifica desde la app.
+2. Catálogo y detalle de oferta serán públicos: RLS permite lectura anónima de ofertas activas y sus ventanas. Solicitar requiere sesión. Los perfiles públicos quedan diferidos.
+3. Estados y flujos legacy coinciden con el SQL; la secuencia de etapas queda a cargo de la interfaz para el MVP. El pago continúa como demo y queda fuera del corte.
+4. Geocodificación: Nominatim limita a una consulta por segundo por aplicación, requiere User-Agent o Referer identificable y prohíbe autocompletado y geocodificación masiva. Buscar solo por botón o Enter, con caché y un módulo `geocoding` reemplazable. Confirmar la política vigente antes de producción.
+5. Confirmar acceso a cuentas/entorno Supabase de preview cuando se llegue a pruebas manuales.
 
 ## 11. Resultado de Fase 0
 
 - Único entregable de esta fase: este inventario y plan.
 - No se modificó la app actual ni `supabase/schema.sql`.
 - No se implementaron rutas, dependencias, UI ni consultas.
-- Validación del checkout actual: `npm test` pasó (8/8); `npm run build` terminó correctamente con una advertencia existente por un chunk de más de 500 kB; `npm run lint` no se pudo ejecutar porque no existe ese script. Estas comprobaciones son del proyecto Vite actual, no de una app Next (que todavía no se creó).
+- Validación del checkout actual: `npm test` pasó (42/42); `npm run build` terminó correctamente con una advertencia existente por un chunk de más de 500 kB; `npm run lint` no existe en el proyecto Vite actual. Estas comprobaciones son del proyecto Vite actual, no de una app Next (que todavía no se creó).
 - **Detenerse aquí y esperar revisión antes de Fase 1.**
