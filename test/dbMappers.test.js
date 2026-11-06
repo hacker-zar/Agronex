@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  MACHINERY_INSERT_COLUMNS, MACHINERY_UPDATE_COLUMNS, RESERVATION_INSERT_COLUMNS,
-  availabilityToUpdate, machineryFromRow, machineryToInsert, machineryToUpdate, profileFromRow, profileToUpdate,
-  quantityForUnit, reservationFromRow, reservationToInsert,
+  MACHINERY_CATEGORIES, MACHINERY_INSERT_COLUMNS, MACHINERY_UPDATE_COLUMNS, RESERVATION_INSERT_COLUMNS,
+  REVIEW_INSERT_COLUMNS, availabilityToUpdate, locationFromRow, machineryFromRow, machineryToInsert,
+  machineryToUpdate, profileFromRow, profileToUpdate, quantityForUnit, reservationFromRow,
+  reservationToInsert, reviewToInsert,
 } from "../js/modules/dbMappers.js";
 
 // Campos que decide el servidor: el cliente jamás debe mandarlos.
@@ -181,4 +182,34 @@ test("profileFromRow devuelve el perfil como lo usa la app", () => {
   assert.equal(app.onboardingCompleted, false);
   assert.equal("termsVersion" in app, false);
   assert.equal(profileFromRow({ id: "x", hectares: null }).hectares, "");
+});
+
+test("reviewToInsert solo manda las seis columnas permitidas por el GRANT", () => {
+  const payload = reviewToInsert({
+    reservationId: "falso", reviewerId: "falso", overallRating: 5,
+    categories: { punctuality: 4, communication: 5 }, wouldWorkAgain: true,
+    tags: ["Puntual"], comment: "Buen trabajo", status: "done", createdAt: "falso",
+  }, { reservationId: "r-1" });
+  assert.deepEqual(Object.keys(payload).sort(), [...REVIEW_INSERT_COLUMNS].sort());
+  assert.deepEqual(payload, {
+    reservation_id: "r-1", rating: 5, category_ratings: { punctuality: 4, communication: 5 },
+    would_work_again: true, tags: ["Puntual"], comment: "Buen trabajo",
+  });
+});
+
+test("locationFromRow convierte la última ubicación al formato de la app", () => {
+  assert.deepEqual(locationFromRow({
+    latitude: -33.8, longitude: -60.5, accuracy_m: "12.4", updated_at: "2026-11-06T12:00:00Z",
+  }), { latitude: -33.8, longitude: -60.5, accuracy: 12.4, createdAt: "2026-11-06T12:00:00Z" });
+  assert.equal(locationFromRow(null), null);
+});
+
+test("machineryFromRow incluye el porcentaje de volver a trabajar", () => {
+  assert.equal(machineryFromRow({ id: "m-1", would_work_again_pct: 88 }).wouldWorkAgainPct, 88);
+});
+
+test("MACHINERY_CATEGORIES contiene las doce categorías del contrato v2", () => {
+  assert.equal(MACHINERY_CATEGORIES.length, 12);
+  assert.ok(MACHINERY_CATEGORIES.includes("Tolva"));
+  assert.ok(MACHINERY_CATEGORIES.includes("Fertilizadora"));
 });

@@ -19,6 +19,21 @@ export const MACHINERY_UPDATE_COLUMNS = [
   "has_operator", "brand", "model_year", "offer_status", "deleted_at", "latitude", "longitude",
   "min_hectares", "daily_capacity",
 ];
+export const MACHINERY_CATEGORIES = [
+  "Camion", "Tractor", "Sembradora", "Pulverizadora", "Cosechadora", "Embolsadora",
+  "Dron", "Otros", "Fertilizadora", "Extractora", "Acoplado", "Tolva",
+];
+export const PRICE_UNITS = [
+  "hectarea", "tonelada", "bolsa", "viaje", "kilometro", "tonelada_kilometro", "hora", "dia", "fijo",
+];
+export const RESERVATION_STATUSES = [
+  "pending", "schedule_counter", "original_kept", "accepted", "working", "done", "rejected", "cancelled",
+];
+export const OPERATION_STAGES = [
+  "accepted", "on_way_origin", "arrived_origin", "loading", "loaded", "in_transit_destination",
+  "arrived_destination", "unloading", "unloaded", "done", "on_way_field", "arrived_field",
+  "working_field", "setup", "planting", "spraying", "mixing", "harvesting", "wrapping_up",
+];
 export const RESERVATION_INSERT_COLUMNS = [
   "machinery_id", "requester_id", "date_start", "date_end", "date_flexible", "hectares", "job_type",
   "job_other", "field_location", "urgency", "start_time", "end_time", "origin", "destination",
@@ -30,6 +45,9 @@ export const AVAILABILITY_UPDATE_COLUMNS = ["date_start", "date_end", "estimated
 export const PROFILE_UPDATE_COLUMNS = [
   "name", "zone", "hectares", "base_location", "base_latitude", "base_longitude", "operation_radius_km",
   "bio", "role", "onboarding_completed", "terms_version", "terms_accepted_at",
+];
+export const REVIEW_INSERT_COLUMNS = [
+  "reservation_id", "rating", "category_ratings", "would_work_again", "tags", "comment",
 ];
 
 // ---- Utilidades ----
@@ -199,6 +217,28 @@ export function reservationFromRow(row) {
   return Object.fromEntries(Object.entries(app).filter(([, v]) => v !== undefined));
 }
 
+export function reviewToInsert(app, { reservationId } = {}) {
+  return pickColumns({
+    reservation_id: reservationId,
+    rating: finite(app.overallRating),
+    category_ratings: app.categories,
+    would_work_again: typeof app.wouldWorkAgain === "boolean" ? app.wouldWorkAgain : undefined,
+    tags: Array.isArray(app.tags) ? app.tags : undefined,
+    comment: opt(app, ["comment"], text),
+  }, REVIEW_INSERT_COLUMNS);
+}
+
+export function locationFromRow(row) {
+  if (!row) return null;
+  const location = {
+    latitude: finite(row.latitude),
+    longitude: finite(row.longitude),
+    accuracy: finite(row.accuracy_m) ?? undefined,
+    createdAt: row.updated_at,
+  };
+  return Object.fromEntries(Object.entries(location).filter(([, value]) => value !== undefined));
+}
+
 // ============================ OFERTAS ============================
 
 function machineryRecord(app) {
@@ -254,6 +294,7 @@ export function machineryFromRow(row) {
     description: row.description,
     rating: finite(row.rating),
     reviews: row.reviews_count ?? 0,
+    wouldWorkAgainPct: finite(row.would_work_again_pct) ?? undefined,
     offerStatus: row.offer_status,
     hasOperator: row.has_operator,
     brand: row.brand || undefined,

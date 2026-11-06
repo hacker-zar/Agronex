@@ -10,8 +10,9 @@
 // ============================================================================
 import {
   availabilityFromRow, availabilityToInsert, availabilityToUpdate,
+  locationFromRow,
   machineryFromRow, machineryToInsert, machineryToUpdate,
-  profileFromRow, profileToUpdate, reservationFromRow, reservationToInsert,
+  profileFromRow, profileToUpdate, reservationFromRow, reservationToInsert, reviewToInsert,
 } from "../modules/dbMappers.js";
 
 const NO_SESSION = "No hay sesión activa.";
@@ -176,6 +177,19 @@ export function createRemoteRepository(client) {
     async respondSchedule(proposalId, action) {
       return client.rpc("respond_schedule", { p_proposal: proposalId, p_action: action });
     },
+    async reportLocation(id, { latitude, longitude, accuracy = null }) {
+      return client.rpc("report_location", {
+        p_reservation: id,
+        p_latitude: latitude,
+        p_longitude: longitude,
+        p_accuracy: accuracy,
+      });
+    },
+    async getLocation(id) {
+      const result = await client.from("reservation_locations").select("*")
+        .eq("reservation_id", id).maybeSingle();
+      return mapOne(result, locationFromRow);
+    },
     // Historial completo de una reserva.
     async timeline(id) {
       const [events, operation, proposals, incidents] = await Promise.all([
@@ -219,9 +233,9 @@ export function createRemoteRepository(client) {
   // ------------------------------- reviews -------------------------------
   // Solo sobre reservas finalizadas ("done"). reviewer/reviewee/rol los fija el servidor.
   const reviews = {
-    async create({ reservationId, rating, tags = [], comment = null }) {
+    async create(app) {
       return client.from("reviews")
-        .insert({ reservation_id: reservationId, rating, tags, comment }).select().single();
+        .insert(reviewToInsert(app, { reservationId: app.reservationId })).select().single();
     },
     async listForReservation(reservationId) {
       return client.from("reviews").select("*").eq("reservation_id", reservationId);

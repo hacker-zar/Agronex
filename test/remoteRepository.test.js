@@ -9,7 +9,7 @@ function fakeClient({ userId = "u-1", result = { data: [], error: null }, rpcRes
     const entry = { table, ops: [] };
     calls.push(entry);
     const builder = {};
-    for (const name of ["select", "insert", "update", "eq", "is", "in", "order", "limit", "single"]) {
+    for (const name of ["select", "insert", "update", "eq", "is", "in", "order", "limit", "single", "maybeSingle"]) {
       builder[name] = (...args) => { entry.ops.push([name, ...args]); return builder; };
     }
     builder.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
@@ -116,10 +116,37 @@ test("historial de reserva: consulta las 4 tablas", async () => {
 test("reseñas e incidentes: solo mandan columnas permitidas", async () => {
   const client = fakeClient();
   const repo = createRemoteRepository(client);
-  await repo.reviews.create({ reservationId: "r-1", rating: 5, tags: ["Puntual"], comment: "Muy bien" });
+  await repo.reviews.create({
+    reservationId: "r-1", overallRating: 5, categories: { punctuality: 5 },
+    wouldWorkAgain: true, tags: ["Puntual"], comment: "Muy bien", reviewerId: "falso",
+  });
   await repo.incidents.report("r-1", "Voy con demora");
-  assert.deepEqual(Object.keys(op(client.calls[0], "insert")[1]).sort(), ["comment", "rating", "reservation_id", "tags"]);
+  assert.deepEqual(Object.keys(op(client.calls[0], "insert")[1]).sort(), [
+    "category_ratings", "comment", "rating", "reservation_id", "tags", "would_work_again",
+  ]);
+  assert.equal(op(client.calls[0], "insert")[1].reviewer_id, undefined);
   assert.deepEqual(Object.keys(op(client.calls[1], "insert")[1]).sort(), ["reason", "reported_by", "reservation_id"]);
+});
+
+test("ubicación: reportar usa RPC y consultar lee una fila de reservation_locations", async () => {
+  const client = fakeClient({
+    result: { data: { reservation_id: "r-1", latitude: -33.8, longitude: -60.5, accuracy_m: 10, updated_at: "now" }, error: null },
+  });
+  const repo = createRemoteRepository(client);
+  await repo.reservations.reportLocation("r-1", { latitude: -33.8, longitude: -60.5, accuracy: 10 });
+  assert.deepEqual(client.calls[0], {
+    rpc: "report_location",
+    args: { p_reservation: "r-1", p_latitude: -33.8, p_longitude: -60.5, p_accuracy: 10 },
+  });
+
+  const { data, error } = await repo.reservations.getLocation("r-1");
+  assert.equal(error, null);
+  assert.deepEqual(data, { latitude: -33.8, longitude: -60.5, accuracy: 10, createdAt: "now" });
+  const query = client.calls[1];
+  assert.equal(query.table, "reservation_locations");
+  assert.deepEqual(op(query, "select"), ["select", "*"]);
+  assert.deepEqual(op(query, "eq"), ["eq", "reservation_id", "r-1"]);
+  assert.deepEqual(op(query, "maybeSingle"), ["maybeSingle"]);
 });
 
 test("registro: manda nombre y términos como metadatos para que el trigger cree el perfil", async () => {
