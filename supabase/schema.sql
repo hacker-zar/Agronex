@@ -3,11 +3,13 @@
 --
 -- Un solo archivo. Se corre UNA vez, completo, en el SQL Editor de una base vacía.
 -- Reemplaza a las migraciones anteriores (01_enums, 02_migracion, 03_coordenadas).
+-- v2: categorías completas (12), reseñas con puntajes por aspecto y "volvería a trabajar",
+--     ubicación en vivo del trabajo (reservation_locations).
 --
 -- Qué crea:
---   * 11 tablas: profiles, machinery, availability_windows, reservations,
+--   * 12 tablas: profiles, machinery, availability_windows, reservations,
 --     reservation_events, reservation_operation_events, reservation_schedule_proposals,
---     incidents, reviews, notifications, payments
+--     incidents, reviews, notifications, payments, reservation_locations
 --   * Trigger que crea el perfil cuando alguien se registra
 --   * Funciones que manejan los cambios de estado (el cliente NO hace UPDATE de estados)
 --   * RLS + permisos por columna (el cliente no puede falsear rating, estados, precios, pagos)
@@ -32,7 +34,7 @@ begin
     and table_name in ('profiles', 'machinery', 'availability_windows', 'reservations',
                        'reservation_events', 'reservation_operation_events',
                        'reservation_schedule_proposals', 'incidents', 'reviews',
-                       'notifications', 'payments');
+                       'notifications', 'payments', 'reservation_locations');
   if v_found is not null then
     raise exception
       'Ya existen tablas de Agronex (%). Este script es para una base vacia: borralas con el bloque RESET del final del archivo y volve a correrlo.',
@@ -54,7 +56,8 @@ begin
                         'reservations_before_insert', 'reservations_after_insert',
                         'incidents_after_insert', 'reviews_before_insert', 'reviews_after_insert',
                         '_apply_reservation_status', 'transition_reservation', 'set_operation_stage',
-                        'propose_schedule', 'respond_schedule')
+                        'propose_schedule', 'respond_schedule', 'valid_category_ratings', 'report_location',
+                        'reservations_after_status_update')
   loop
     execute format('drop function if exists %s cascade', f.sig);
   end loop;
@@ -84,6 +87,23 @@ end $$;
 -- ============================================================================
 -- 1. Tablas
 -- ============================================================================
+
+-- 1.0 Validador de puntajes por aspecto de una reseña: objeto JSON con valores numéricos de 1 a 5
+create function public.valid_category_ratings(c jsonb)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select jsonb_typeof(c) = 'object'
+     and pg_column_size(c) <= 1024
+     and not exists (
+       select 1 from jsonb_each(c) e
+       where case when jsonb_typeof(e.value) = 'number'
+                  then (e.value #>> '{}')::numeric not between 1 and 5
+                  else true end
+     );
+$$;
 
 -- 1.1 Perfiles (1 fila por usuario de auth.users)
 create table public.profiles (
@@ -115,8 +135,8 @@ create table public.profiles (
 create table public.machinery (
   id             uuid primary key default gen_random_uuid(),
   owner_id       uuid not null references public.profiles(id),
-  category       text not null check (category in ('Camion', 'Tractor', 'Sembradora', 'Pulverizadora',
-                                                    'Cosechadora', 'Embolsadora', 'Dron', 'Otros')),
+  category       text not null check (category in ('Camion', 'Tractor', 'Sembradora', 'Pulverizadora', 'Cosechadora', 'Embolsadora',
+                                                    'Dron', 'Otros', 'Fertilizadora', 'Extractora', 'Acoplado', 'Tolva')),
   title          text not null check (char_length(title) between 1 and 120),
   price          numeric not null check (price > 0),
   price_unit     text not null default 'hectarea'
@@ -133,6 +153,7 @@ create table public.machinery (
   daily_capacity numeric check (daily_capacity is null or daily_capacity > 0),
   rating         numeric check (rating between 1 and 5),
   reviews_count  integer not null default 0,
+  would_work_again_pct integer check (would_work_again_pct is null or would_work_again_pct between 0 and 100),
   has_operator   boolean not null default false,
   brand          text,
   model_year     integer check (model_year between 1950 and 2100),
@@ -289,10 +310,13 @@ create table public.reviews (
   reviewee_id    uuid not null references public.profiles(id),
   reviewer_role  text not null check (reviewer_role in ('producer', 'contractor')),
   rating         smallint not null check (rating between 1 and 5),
+  category_ratings jsonb not null default '{}'::jsonb,
+  would_work_again boolean not null,
   tags           text[] not null default '{}',
   comment        text check (comment is null or char_length(comment) <= 500),
   created_at     timestamptz not null default now(),
-  constraint reviews_one_per_party unique (reservation_id, reviewer_id)
+  constraint reviews_one_per_party unique (reservation_id, reviewer_id),
+  constraint reviews_category_ratings_check check (public.valid_category_ratings(category_ratings))
 );
 
 -- 1.10 Notificaciones
@@ -327,6 +351,16 @@ create table public.payments (
   notes             text,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
+);
+
+-- 1.12 Última ubicación compartida por el contratista mientras el trabajo está en curso.
+--      Una sola fila por reserva (no se guarda historial). Se borra sola al terminar el trabajo.
+create table public.reservation_locations (
+  reservation_id uuid primary key references public.reservations(id) on delete cascade,
+  latitude       double precision not null check (latitude between -90 and 90),
+  longitude      double precision not null check (longitude between -180 and 180),
+  accuracy_m     numeric check (accuracy_m is null or accuracy_m >= 0),
+  updated_at     timestamptz not null default now()
 );
 
 -- ============================================================================
@@ -588,9 +622,11 @@ begin
   end if;
   select r.machinery_id into v_machinery from public.reservations r where r.id = new.reservation_id;
   update public.machinery m
-     set rating = s.avg_rating, reviews_count = s.cnt
+     set rating = s.avg_rating, reviews_count = s.cnt, would_work_again_pct = s.pct
     from (
-      select round(avg(v.rating)::numeric, 1) as avg_rating, count(*)::int as cnt
+      select round(avg(v.rating)::numeric, 1) as avg_rating,
+             count(*)::int as cnt,
+             round(100.0 * count(*) filter (where v.would_work_again) / count(*))::int as pct
         from public.reviews v
         join public.reservations rs on rs.id = v.reservation_id
        where rs.machinery_id = v_machinery and v.reviewer_role = 'producer'
@@ -919,6 +955,73 @@ begin
   return pr;
 end $$;
 
+-- 3.14 Ubicación en vivo: solo el contratista, solo con el trabajo en curso, como mucho 1 vez cada 3 s
+create function public.report_location(
+  p_reservation uuid,
+  p_latitude double precision,
+  p_longitude double precision,
+  p_accuracy numeric default null
+)
+returns public.reservation_locations
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  r public.reservations;
+  v_uid uuid := auth.uid();
+  v_loc public.reservation_locations;
+begin
+  if v_uid is null then
+    raise exception 'Necesitás iniciar sesión.' using errcode = '28000';
+  end if;
+
+  select * into r from public.reservations where id = p_reservation;
+  if not found or r.owner_id <> v_uid then
+    raise exception 'Solo el contratista puede compartir su ubicación.' using errcode = '42501';
+  end if;
+  if r.status <> 'working' then
+    raise exception 'La ubicación solo se comparte mientras el trabajo está en curso.' using errcode = '22023';
+  end if;
+  if p_latitude is null or p_longitude is null
+     or p_latitude not between -90 and 90 or p_longitude not between -180 and 180 then
+    raise exception 'Coordenadas inválidas.' using errcode = '22023';
+  end if;
+
+  insert into public.reservation_locations as l (reservation_id, latitude, longitude, accuracy_m)
+  values (r.id, p_latitude, p_longitude, p_accuracy)
+  on conflict (reservation_id) do update
+     set latitude = excluded.latitude,
+         longitude = excluded.longitude,
+         accuracy_m = excluded.accuracy_m,
+         updated_at = now()
+   where l.updated_at < now() - interval '3 seconds'
+  returning * into v_loc;
+
+  if v_loc.reservation_id is null then   -- llegó antes de los 3 s: se devuelve la última guardada
+    select * into v_loc from public.reservation_locations where reservation_id = r.id;
+  end if;
+  return v_loc;
+end $$;
+
+-- Al salir de "en curso" (terminado, cancelado, etc.) se borra la ubicación compartida
+create function public.reservations_after_status_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.status is distinct from old.status and new.status <> 'working' then
+    delete from public.reservation_locations where reservation_id = new.id;
+  end if;
+  return new;
+end $$;
+
+create trigger trg_reservations_after_status_update
+  after update of status on public.reservations
+  for each row execute function public.reservations_after_status_update();
+
 -- ============================================================================
 -- 4. Seguridad: RLS + permisos por columna
 -- ============================================================================
@@ -933,12 +1036,13 @@ alter table public.incidents                      enable row level security;
 alter table public.reviews                        enable row level security;
 alter table public.notifications                  enable row level security;
 alter table public.payments                       enable row level security;
+alter table public.reservation_locations          enable row level security;
 
 -- Partir de cero: nadie tiene nada; después se otorga lo mínimo.
 revoke all on public.profiles, public.machinery, public.availability_windows, public.reservations,
               public.reservation_events, public.reservation_operation_events,
               public.reservation_schedule_proposals, public.incidents, public.reviews,
-              public.notifications, public.payments
+              public.notifications, public.payments, public.reservation_locations
   from anon, authenticated;
 
 -- 4.1 profiles: cada uno ve y edita el suyo; las contrapartes de una reserva se ven entre sí
@@ -1060,7 +1164,8 @@ create policy payments_select on public.payments for select to authenticated
 
 -- 4.9 reviews: las partes las ven; se crean solo sobre trabajos finalizados
 grant select on public.reviews to authenticated;
-grant insert (reservation_id, rating, tags, comment) on public.reviews to authenticated;
+grant insert (reservation_id, rating, category_ratings, would_work_again, tags, comment)
+  on public.reviews to authenticated;
 
 create policy reviews_select on public.reviews for select to authenticated
   using (public.is_reservation_party(reservation_id));
@@ -1068,7 +1173,13 @@ create policy reviews_select on public.reviews for select to authenticated
 create policy reviews_insert on public.reviews for insert to authenticated
   with check (reviewer_id = auth.uid() and public.is_reservation_party(reservation_id));
 
--- 4.10 Permisos de ejecución de funciones
+-- 4.10 reservation_locations: solo lectura para las partes (la escribe report_location)
+grant select on public.reservation_locations to authenticated;
+
+create policy locations_select on public.reservation_locations for select to authenticated
+  using (public.is_reservation_party(reservation_id));
+
+-- 4.11 Permisos de ejecución de funciones
 revoke all on function public.handle_new_user()                              from public, anon, authenticated;
 revoke all on function public._apply_reservation_status(uuid, text, uuid, text) from public, anon, authenticated;
 
@@ -1085,13 +1196,20 @@ grant execute on function public.propose_schedule(uuid, text, date, date, time, 
 revoke all on function public.respond_schedule(uuid, text) from public, anon, authenticated;
 grant execute on function public.respond_schedule(uuid, text) to authenticated;
 
+revoke all on function public.report_location(uuid, double precision, double precision, numeric)
+  from public, anon, authenticated;
+grant execute on function public.report_location(uuid, double precision, double precision, numeric) to authenticated;
+
+revoke all on function public.valid_category_ratings(jsonb) from public, anon;
+grant execute on function public.valid_category_ratings(jsonb) to authenticated;
+
 revoke all on function public.is_reservation_party(uuid) from public, anon;
 grant execute on function public.is_reservation_party(uuid) to authenticated;
 
 commit;
 
 -- ============================================================================
--- Verificación: deben aparecer las 11 tablas con rls_activo = true y políticas > 0
+-- Verificación: deben aparecer las 12 tablas con rls_activo = true y políticas > 0
 -- (excepto notifications/payments/etc. que igual tienen al menos 1)
 -- ============================================================================
 select c.relname as tabla, c.relrowsecurity as rls_activo,
@@ -1106,5 +1224,5 @@ order by c.relname;
 -- ============================================================================
 -- drop table if exists public.payments, public.reviews, public.notifications, public.incidents,
 --   public.reservation_schedule_proposals, public.reservation_operation_events,
---   public.reservation_events, public.reservations, public.availability_windows,
---   public.machinery, public.profiles cascade;
+--   public.reservation_events, public.reservation_locations, public.reservations,
+--   public.availability_windows, public.machinery, public.profiles cascade;
