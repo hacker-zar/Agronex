@@ -1,0 +1,2 @@
+export const metadata = { title: "Términos y Condiciones | Agronex" };
+export default function TermsPage() { return <main className="shell page"><article className="card"><p className="eyebrow">Documento legal</p><h1>Términos y Condiciones</h1><p>Para crear una cuenta en Agronex tenés que leer y aceptar los Términos y Condiciones de Uso.</p><p className="muted">El archivo fuente histórico `legal/terminos-agronex.html` no está presente en el repositorio. Esta página debe reemplazarse por su contenido aprobado antes de publicar.</p></article></main>; }
