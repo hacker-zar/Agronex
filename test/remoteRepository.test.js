@@ -35,7 +35,7 @@ test("sin sesión: las operaciones que la requieren devuelven error y no llaman 
   const repo = createRemoteRepository(client);
   assert.match((await repo.machinery.create({ title: "x" })).error.message, /sesión/);
   assert.match((await repo.reservations.create({ machineId: "m" })).error.message, /sesión/);
-  assert.match((await repo.incidents.report("r", "x")).error.message, /sesión/);
+  assert.match((await repo.incidents.report("r", { reason: "x" })).error.message, /sesión/);
   assert.equal(client.calls.length, 0);
 });
 
@@ -120,12 +120,22 @@ test("reseñas e incidentes: solo mandan columnas permitidas", async () => {
     reservationId: "r-1", overallRating: 5, categories: { punctuality: 5 },
     wouldWorkAgain: true, tags: ["Puntual"], comment: "Muy bien", reviewerId: "falso",
   });
-  await repo.incidents.report("r-1", "Voy con demora");
+  await repo.incidents.report("r-1", { reason: "Voy con demora", delayType: "execution", delayMinutes: 15 });
   assert.deepEqual(Object.keys(op(client.calls[0], "insert")[1]).sort(), [
     "category_ratings", "comment", "rating", "reservation_id", "tags", "would_work_again",
   ]);
   assert.equal(op(client.calls[0], "insert")[1].reviewer_id, undefined);
-  assert.deepEqual(Object.keys(op(client.calls[1], "insert")[1]).sort(), ["reason", "reported_by", "reservation_id"]);
+  assert.deepEqual(op(client.calls[1], "insert")[1], {
+    reservation_id: "r-1", reason: "Voy con demora", delay_type: "execution", delay_minutes: 15, reported_by: "u-1",
+  });
+});
+
+test("incidentes comunes no mandan campos de demora", async () => {
+  const client = fakeClient();
+  await createRemoteRepository(client).incidents.report("r-1", { reason: "Ruta cortada" });
+  assert.deepEqual(op(client.calls[0], "insert")[1], {
+    reservation_id: "r-1", reason: "Ruta cortada", delay_type: null, delay_minutes: null, reported_by: "u-1",
+  });
 });
 
 test("ubicación: reportar usa RPC y consultar lee una fila de reservation_locations", async () => {

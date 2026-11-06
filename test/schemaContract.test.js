@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   MACHINERY_CATEGORIES,
+  DELAY_MINUTES,
+  DELAY_TYPES,
   OPERATION_STAGES,
   PRICE_UNITS,
   RESERVATION_STATUSES,
@@ -34,4 +36,16 @@ test("las categorías, unidades, estados y etapas del mapper coinciden con schem
   for (const [label, applicationValues, schemaValues] of expected) {
     assert.deepEqual(applicationValues, schemaValues, `${label} difiere de supabase/schema.sql`);
   }
+});
+
+test("los tipos y el rango de minutos de demora coinciden con incidents en schema.sql", () => {
+  const incidents = tableDefinition("incidents");
+  const types = incidents.match(/delay_type\s+text[\s\S]*?in\s*\(([^)]*)\)/i);
+  const minutes = incidents.match(/delay_minutes\s+integer[\s\S]*?between\s+(\d+)\s+and\s+(\d+)/i);
+  assert.ok(types, "No se encontró CHECK delay_type de public.incidents");
+  assert.ok(minutes, "No se encontró rango CHECK delay_minutes de public.incidents");
+  assert.deepEqual([...types[1].matchAll(/'([^']+)'/g)].map((match) => match[1]), DELAY_TYPES,
+    "DELAY_TYPES difiere de supabase/schema.sql");
+  assert.deepEqual({ min: Number(minutes[1]), max: Number(minutes[2]) }, DELAY_MINUTES,
+    "DELAY_MINUTES difiere de supabase/schema.sql");
 });

@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  MACHINERY_CATEGORIES, MACHINERY_INSERT_COLUMNS, MACHINERY_UPDATE_COLUMNS, RESERVATION_INSERT_COLUMNS,
+  DELAY_MINUTES, DELAY_TYPES, INCIDENT_INSERT_COLUMNS, MACHINERY_CATEGORIES, MACHINERY_INSERT_COLUMNS, MACHINERY_UPDATE_COLUMNS, RESERVATION_INSERT_COLUMNS,
   REVIEW_INSERT_COLUMNS, availabilityToUpdate, locationFromRow, machineryFromRow, machineryToInsert,
-  machineryToUpdate, profileFromRow, profileToUpdate, quantityForUnit, reservationFromRow,
+  incidentFromRow, incidentToInsert, machineryToUpdate, profileFromRow, profileToUpdate, quantityForUnit, reservationFromRow,
   reservationToInsert, reviewToInsert,
 } from "../js/modules/dbMappers.js";
 
@@ -212,4 +212,26 @@ test("MACHINERY_CATEGORIES contiene las doce categorías del contrato v2", () =>
   assert.equal(MACHINERY_CATEGORIES.length, 12);
   assert.ok(MACHINERY_CATEGORIES.includes("Tolva"));
   assert.ok(MACHINERY_CATEGORIES.includes("Fertilizadora"));
+});
+
+test("incidentToInsert filtra campos y diferencia demoras de incidentes comunes", () => {
+  assert.deepEqual(incidentToInsert({ reason: "Demora", delayType: "execution", minutesDelayed: 45, id: "fake" },
+    { reservationId: "r-1", reportedBy: "u-1" }), {
+    reservation_id: "r-1", reason: "Demora", delay_type: "execution", delay_minutes: 45, reported_by: "u-1",
+  });
+  assert.deepEqual(incidentToInsert({ reason: "Ruta cortada", extra: "no" },
+    { reservationId: "r-2", reportedBy: "u-2" }), {
+    reservation_id: "r-2", reason: "Ruta cortada", delay_type: null, delay_minutes: null, reported_by: "u-2",
+  });
+  assert.deepEqual(Object.keys(incidentToInsert({ reason: "x" }, { reservationId: "r", reportedBy: "u" })).sort(),
+    [...INCIDENT_INSERT_COLUMNS].sort());
+});
+
+test("incidentFromRow devuelve el modelo de demora o incidente común", () => {
+  assert.deepEqual(incidentFromRow({ reason: "Tarde", delay_type: "start", delay_minutes: "20", reported_by: "u", created_at: "now" }),
+    { reason: "Tarde", createdAt: "now", reportedBy: "u", delayType: "start", minutesDelayed: 20 });
+  assert.deepEqual(incidentFromRow({ reason: "Ruta cortada", delay_type: null, delay_minutes: null, reported_by: "u", created_at: "now" }),
+    { reason: "Ruta cortada", createdAt: "now", reportedBy: "u" });
+  assert.deepEqual(DELAY_TYPES, ["start", "execution", "end"]);
+  assert.deepEqual(DELAY_MINUTES, { min: 1, max: 1440 });
 });

@@ -49,6 +49,9 @@ export const PROFILE_UPDATE_COLUMNS = [
 export const REVIEW_INSERT_COLUMNS = [
   "reservation_id", "rating", "category_ratings", "would_work_again", "tags", "comment",
 ];
+export const INCIDENT_INSERT_COLUMNS = ["reservation_id", "reason", "delay_type", "delay_minutes", "reported_by"];
+export const DELAY_TYPES = ["start", "execution", "end"];
+export const DELAY_MINUTES = { min: 1, max: 1440 };
 
 // ---- Utilidades ----
 const isBlank = (v) => v === undefined || v === null || (typeof v === "string" && v.trim() === "");
@@ -237,6 +240,26 @@ export function locationFromRow(row) {
     createdAt: row.updated_at,
   };
   return Object.fromEntries(Object.entries(location).filter(([, value]) => value !== undefined));
+}
+
+export function incidentToInsert(app, { reportedBy, reservationId } = {}) {
+  const isDelay = app.delayType !== undefined || app.delayMinutes !== undefined || app.minutesDelayed !== undefined;
+  return pickColumns({
+    reservation_id: reservationId,
+    reason: text(app.reason) ?? "",
+    delay_type: isDelay ? text(app.delayType) : null,
+    delay_minutes: isDelay ? finite(app.delayMinutes ?? app.minutesDelayed) : null,
+    reported_by: reportedBy,
+  }, INCIDENT_INSERT_COLUMNS, { keepNull: true });
+}
+
+export function incidentFromRow(row) {
+  if (!row) return null;
+  const common = { reason: row.reason ?? "", createdAt: row.created_at, reportedBy: row.reported_by };
+  if (row.delay_minutes !== null && row.delay_minutes !== undefined) {
+    return { ...common, delayType: row.delay_type, minutesDelayed: finite(row.delay_minutes) };
+  }
+  return common;
 }
 
 // ============================ OFERTAS ============================

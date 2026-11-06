@@ -10,7 +10,7 @@
 // ============================================================================
 import {
   availabilityFromRow, availabilityToInsert, availabilityToUpdate,
-  locationFromRow,
+  incidentFromRow, incidentToInsert, locationFromRow,
   machineryFromRow, machineryToInsert, machineryToUpdate,
   profileFromRow, profileToUpdate, reservationFromRow, reservationToInsert, reviewToInsert,
 } from "../modules/dbMappers.js";
@@ -211,11 +211,12 @@ export function createRemoteRepository(client) {
 
   // ------------------------------ incidents ------------------------------
   const incidents = {
-    async report(reservationId, reason) {
+    async report(reservationId, app) {
       const uid = await currentUserId();
       if (!uid) return fail(NO_SESSION);
-      return client.from("incidents")
-        .insert({ reservation_id: reservationId, reason, reported_by: uid }).select().single();
+      const result = await client.from("incidents")
+        .insert(incidentToInsert(app, { reservationId, reportedBy: uid })).select().single();
+      return mapOne(result, incidentFromRow);
     },
   };
 
