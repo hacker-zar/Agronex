@@ -40,7 +40,11 @@ if (import.meta.env.PROD) {
 
 const TERMS_VERSION = "1.0";
 const TERMS_EFFECTIVE_DATE = "2026-06-11";
-const TERMS_URL = "legal/terminos-agronex.html";
+const TERMS_URL = "/legal/terminos-agronex.html";
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || (import.meta.env.DEV ? "1x00000000000000000000AA" : "");
+let registrationCaptchaToken = "";
+let registrationCaptchaWidgetId = null;
+let turnstileScriptPromise = null;
 
 const seedMachines = [
   {
@@ -452,7 +456,6 @@ function init() {
   bindPublishWizard();
   bindProfile();
   bindAuth();
-  bindTermsModal();
   bindPublicProfileModal();
   bindNotificationCenter();
   bindContactModal();
@@ -1951,39 +1954,6 @@ function responseTimeFor(seed) {
   const hours = 2 + (Math.abs(hashCode(seed || "respuesta")) % 20);
   return hours < 12 ? `${hours} h aprox.` : "24 h aprox.";
 }
-function bindTermsModal() {
-  const openBtn = $("#auth-terms-open");
-  const closeBtn = $("#terms-close");
-  const acceptBtn = $("#terms-accept-btn");
-  const modal = $("#terms-modal");
-  if (!modal) return;
-  if (openBtn) openBtn.addEventListener("click", openTermsModal);
-  if (closeBtn) closeBtn.addEventListener("click", closeTermsModal);
-  if (acceptBtn) acceptBtn.addEventListener("click", acceptTermsFromModal);
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) closeTermsModal();
-  });
-}
-
-function openTermsModal() {
-  const modal = $("#terms-modal");
-  if (!modal) return;
-  modal.hidden = false;
-}
-
-function closeTermsModal() {
-  const modal = $("#terms-modal");
-  if (!modal) return;
-  modal.hidden = true;
-}
-
-function acceptTermsFromModal() {
-  const form = $("#auth-form");
-  const termsInput = form ? formControl(form, "termsAccepted") : null;
-  if (termsInput) termsInput.checked = true;
-  hideAuthError();
-  closeTermsModal();
-}
 function bindAuth() {
   const form = $("#auth-form");
   $$(".auth-tab").forEach((btn) => {
@@ -1993,8 +1963,9 @@ function bindAuth() {
     });
   });
 
-  form.addEventListener("submit", (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (form.dataset.processing === "true") return;
     const mode = form.dataset.mode || "login";
     const email = clean(formControl(form, "email").value).toLowerCase();
     const name = clean(formControl(form, "name").value);
@@ -2021,6 +1992,28 @@ function bindAuth() {
     if (mode === "register" && !termsAccepted) {
       showAuthError("Para crear tu cuenta tenes que aceptar los Terminos y Condiciones de Agronex.");
       return;
+    }
+
+    if (mode === "register") {
+      if (!TURNSTILE_SITE_KEY) {
+        showAuthError("La verificación anti-spam todavía no está configurada para este sitio.");
+        return;
+      }
+      if (!registrationCaptchaToken) {
+        showAuthError("Completá la verificación anti-spam para crear tu cuenta.");
+        return;
+      }
+      form.dataset.processing = "true";
+      $("#auth-submit").disabled = true;
+      const captchaValid = await verifyRegistrationCaptcha(registrationCaptchaToken);
+      registrationCaptchaToken = "";
+      resetRegistrationCaptcha();
+      form.dataset.processing = "false";
+      $("#auth-submit").disabled = false;
+      if (!captchaValid) {
+        showAuthError("No pudimos validar la verificación. Intentá nuevamente.");
+        return;
+      }
     }
 
     const signedInAt = new Date().toISOString();
@@ -2055,19 +2048,85 @@ function renderAuth() {
   const passwordField = $("#auth-password-field");
   const passwordInput = formControl(form, "password");
   form.dataset.mode = mode;
-  $$(".auth-tab").forEach((btn) => btn.classList.toggle("active", btn.dataset.authMode === mode));
+  $("#auth-shell")?.classList.toggle("is-register", mode === "register");
+  $$(".auth-tab").forEach((btn) => {
+    const selected = btn.dataset.authMode === mode;
+    btn.classList.toggle("active", selected);
+    btn.setAttribute("aria-selected", String(selected));
+  });
   $$(".auth-register-field").forEach((field) => { field.hidden = mode !== "register"; });
   if (passwordField) {
     const passwordLabel = passwordField.querySelector("span");
     if (passwordLabel) passwordLabel.textContent = mode === "register" ? "Crear contraseña" : "Contraseña";
   }
-  if (passwordInput) {
-    passwordInput.placeholder = mode === "register" ? "Creá una contraseña" : "Ingresá tu contraseña";
-  }
+  if (passwordInput) passwordInput.placeholder = mode === "register" ? "Creá una contraseña" : "Ingresá tu contraseña";
   $("#auth-submit .btn-label").innerHTML = mode === "register"
     ? '<i class="fa-solid fa-user-plus"></i> Crear cuenta'
     : '<i class="fa-solid fa-arrow-right-to-bracket"></i> Iniciar sesión';
   hideAuthError();
+  if (mode === "register") renderRegistrationCaptcha();
+  else resetRegistrationCaptcha();
+}
+
+function loadTurnstile() {
+  if (window.turnstile) return Promise.resolve(window.turnstile);
+  if (turnstileScriptPromise) return turnstileScriptPromise;
+  turnstileScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => window.turnstile ? resolve(window.turnstile) : reject(new Error("Turnstile no disponible"));
+    script.onerror = () => reject(new Error("No se pudo cargar Turnstile"));
+    document.head.append(script);
+  });
+  return turnstileScriptPromise;
+}
+
+async function renderRegistrationCaptcha() {
+  const mount = $("#auth-captcha-widget");
+  const hint = $("#auth-captcha-hint");
+  if (!mount) return;
+  if (!TURNSTILE_SITE_KEY) {
+    if (hint) hint.textContent = "La verificación anti-spam no está configurada para este sitio.";
+    return;
+  }
+  if (registrationCaptchaWidgetId !== null) return;
+  try {
+    const turnstile = await loadTurnstile();
+    if (!mount.isConnected || $("#auth-form")?.dataset.mode !== "register" || registrationCaptchaWidgetId !== null) return;
+    registrationCaptchaWidgetId = turnstile.render(mount, {
+      sitekey: TURNSTILE_SITE_KEY,
+      theme: "light",
+      callback: (token) => { registrationCaptchaToken = token; hideAuthError(); },
+      "expired-callback": () => { registrationCaptchaToken = ""; },
+      "error-callback": () => { registrationCaptchaToken = ""; },
+    });
+    if (hint) hint.textContent = "Verificación protegida por Cloudflare Turnstile.";
+  } catch {
+    if (hint) hint.textContent = "No pudimos cargar la verificación. Revisá tu conexión e intentá de nuevo.";
+  }
+}
+
+function resetRegistrationCaptcha() {
+  registrationCaptchaToken = "";
+  if (registrationCaptchaWidgetId !== null && window.turnstile) {
+    try { window.turnstile.reset(registrationCaptchaWidgetId); } catch { /* widget ya desmontado */ }
+  }
+}
+
+async function verifyRegistrationCaptcha(token) {
+  try {
+    const response = await fetch("/api/verify-turnstile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    if (!response.ok) return false;
+    return Boolean((await response.json()).success);
+  } catch {
+    return false;
+  }
 }
 
 function showAuthError(message) {

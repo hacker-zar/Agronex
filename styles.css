@@ -6645,6 +6645,56 @@ body.error-state .app-shell {
   background:color-mix(in srgb,var(--accent) 12%,transparent);
 }
 
+/* A small field-inspired motion detail behind the existing registration card. */
+.auth-shell.is-register {
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  border-radius:24px;
+  background:
+    radial-gradient(ellipse at 12% 16%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 42%),
+    radial-gradient(ellipse at 88% 76%,color-mix(in srgb,var(--accent) 8%,transparent),transparent 40%),
+    var(--bg);
+}
+.auth-wave-field { display:none; }
+.auth-shell.is-register .auth-wave-field { position:absolute; z-index:0; inset:0; display:block; overflow:hidden; pointer-events:none; }
+.auth-shell.is-register .auth-card { position:relative; z-index:1; }
+.auth-shell.is-register .auth-wave-field span {
+  position:absolute;
+  left:var(--x);
+  top:var(--y);
+  width:4px;
+  height:4px;
+  border-radius:50%;
+  background:#9edb73;
+  box-shadow:0 0 10px 2px color-mix(in srgb,var(--accent) 24%,transparent);
+  opacity:.42;
+  animation:auth-wave-float var(--duration) ease-in-out var(--delay) infinite alternate;
+}
+@keyframes auth-wave-float {
+  0% { transform:translate3d(0,12px,0) scale(.82); opacity:.2; }
+  50% { transform:translate3d(5px,-10px,0) scale(1.12); opacity:.62; }
+  100% { transform:translate3d(-4px,7px,0) scale(.9); opacity:.32; }
+}
+.auth-shell.is-register .auth-captcha { display:grid; gap:7px; padding:12px; border:1px solid var(--border); border-radius:14px; background:var(--bg); }
+.auth-captcha #auth-captcha-widget { min-height:65px; }
+.auth-captcha small { color:var(--muted); font-size:11px; line-height:1.45; }
+.terms-consent a { color:var(--accent-strong); text-decoration:underline; text-underline-offset:2px; }
+.profile-legal-card { display:flex; align-items:center; gap:14px; margin-top:20px; padding:16px; border:1px solid var(--border); border-radius:var(--r-md); background:var(--bg); }
+.profile-legal-icon { display:grid; width:40px; height:40px; flex:none; place-items:center; border-radius:12px; background:var(--accent-soft); color:var(--accent-strong); font-size:17px; }
+.profile-legal-card div { flex:1; }
+.profile-legal-card strong { font-size:14px; }
+.profile-legal-card p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+.profile-legal-card .btn { flex:none; }
+
+@media (max-width:420px) {
+  .profile-legal-card { align-items:flex-start; flex-wrap:wrap; }
+  .profile-legal-card .btn { width:100%; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .auth-shell.is-register .auth-wave-field span { animation:none; }
+}
+
 /* Keep the press feedback on touch and mouse interactions within the Agronex palette. */
 button { -webkit-tap-highlight-color:color-mix(in srgb,var(--accent) 22%,transparent); }
 button:not(:disabled):focus-visible {
