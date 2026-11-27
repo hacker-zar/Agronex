@@ -3,3 +3,5 @@ dist/
 .vercel/
 vite-*.log
 vite-*.err.log
+.env*
+!.env.example

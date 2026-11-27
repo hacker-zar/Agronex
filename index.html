@@ -449,6 +449,14 @@
               </label>
             </div>
           </section>
+          <section class="profile-legal-card" aria-label="Información legal">
+            <span class="profile-legal-icon"><i class="fa-regular fa-file-lines" aria-hidden="true"></i></span>
+            <div>
+              <strong>Información legal</strong>
+              <p>Consultá las condiciones de uso de Agronex.</p>
+            </div>
+            <a class="btn ghost" href="/legal/terminos-agronex.html">Ver términos</a>
+          </section>
           <div class="form-actions">
             <p class="profile-autosave-note">Los cambios se guardan automáticamente.</p>
             <button class="btn ghost" type="button" id="logout-btn"><i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar sesión</button>
@@ -459,7 +467,17 @@
 
     <!-- ACCESO -->
     <section class="screen" id="screen-acceso" aria-labelledby="acceso-title">
-      <div class="auth-shell">
+      <div class="auth-shell" id="auth-shell">
+        <div class="auth-wave-field" aria-hidden="true">
+            <span style="--x:7%;--y:69%;--delay:-1s;--duration:7s"></span><span style="--x:13%;--y:43%;--delay:-4s;--duration:8s"></span>
+            <span style="--x:19%;--y:78%;--delay:-2s;--duration:9s"></span><span style="--x:25%;--y:31%;--delay:-6s;--duration:7.5s"></span>
+            <span style="--x:31%;--y:58%;--delay:-3s;--duration:8.5s"></span><span style="--x:37%;--y:83%;--delay:-5s;--duration:9.5s"></span>
+            <span style="--x:43%;--y:40%;--delay:-1.5s;--duration:8s"></span><span style="--x:49%;--y:67%;--delay:-7s;--duration:10s"></span>
+            <span style="--x:55%;--y:25%;--delay:-4.5s;--duration:8.5s"></span><span style="--x:61%;--y:52%;--delay:-2.5s;--duration:7s"></span>
+            <span style="--x:67%;--y:76%;--delay:-6.5s;--duration:9s"></span><span style="--x:73%;--y:37%;--delay:-3.5s;--duration:10s"></span>
+            <span style="--x:79%;--y:62%;--delay:-5.5s;--duration:8s"></span><span style="--x:85%;--y:20%;--delay:-1.8s;--duration:9.5s"></span>
+            <span style="--x:91%;--y:49%;--delay:-7.5s;--duration:7.5s"></span><span style="--x:96%;--y:82%;--delay:-2.8s;--duration:8.8s"></span>
+        </div>
         <form class="auth-card anim-card" id="auth-form" novalidate>
           <div class="page-head compact">
             <div>
@@ -468,8 +486,8 @@
             </div>
           </div>
           <div class="auth-tabs" role="tablist" aria-label="Modo de acceso">
-            <button class="auth-tab active" type="button" data-auth-mode="login">Iniciar sesión</button>
-            <button class="auth-tab" type="button" data-auth-mode="register">Registrarme</button>
+            <button class="auth-tab active" type="button" data-auth-mode="login" role="tab" aria-selected="true">Iniciar sesión</button>
+            <button class="auth-tab" type="button" data-auth-mode="register" role="tab" aria-selected="false">Registrarme</button>
           </div>
           <label class="full-field auth-register-field">
             <span>Nombre</span>
@@ -483,15 +501,16 @@
             <span>Contraseña</span>
             <input name="password" type="password" maxlength="80" placeholder="Ingresá tu contraseña">
           </label>
+          <div class="auth-captcha auth-register-field" role="group" aria-label="Verificación anti-spam">
+            <div id="auth-captcha-widget"></div>
+            <small id="auth-captcha-hint">Verificamos que seas una persona para proteger la comunidad.</small>
+          </div>
           <div class="terms-consent auth-register-field">
             <label>
               <input name="termsAccepted" type="checkbox">
-              <span>Acepto los Terminos y Condiciones de Uso de Agronex.</span>
+              <span>Acepto los <a href="/legal/terminos-agronex.html" target="_blank" rel="noopener">Términos y Condiciones de Uso</a> de Agronex.</span>
             </label>
-            <button class="link-button" type="button" id="auth-terms-open">
-              Ver terminos completos
-            </button>
-            <small>Version 1.0 vigente desde el 11 de junio de 2026.</small>
+            <small>Versión 1.0 · vigente desde el 11 de junio de 2026.</small>
           </div>
           <p class="form-error" id="auth-error" role="alert" hidden></p>
           <div class="form-actions">
@@ -618,35 +637,6 @@
           </div>
           <div class="public-profile-list" id="public-profile-publications"></div>
         </section>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL TERMINOS -->
-  <div class="modal-backdrop" id="terms-modal" hidden>
-    <div class="modal legal-modal" role="dialog" aria-modal="true" aria-labelledby="terms-title">
-      <div class="modal-head">
-        <div>
-          <p class="eyebrow">Documento legal</p>
-          <h2 id="terms-title">Terminos y Condiciones</h2>
-        </div>
-        <button class="icon-btn" type="button" id="terms-close" aria-label="Cerrar terminos">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-      </div>
-      <p class="legal-intro">
-        Para crear una cuenta en Agronex tenes que leer y aceptar los Terminos y Condiciones de Uso.
-      </p>
-      <div class="legal-viewer">
-        <iframe src="legal/terminos-agronex.html" title="Terminos y Condiciones de Uso de Agronex"></iframe>
-      </div>
-      <div class="form-actions">
-        <a class="btn ghost" href="legal/terminos-agronex.html" target="_blank" rel="noopener">
-          <i class="fa-solid fa-up-right-from-square"></i> Abrir en nueva pestana
-        </a>
-        <button class="btn primary" type="button" id="terms-accept-btn">
-          <i class="fa-solid fa-check"></i> Aceptar y continuar
-        </button>
       </div>
     </div>
   </div>
@@ -1150,9 +1140,8 @@
     <form class="modal review-modal" id="review-form" novalidate>
       <div class="modal-head">
         <div>
-          <p class="eyebrow">Evaluacion verificada</p>
+          <p class="eyebrow">Evaluación verificada</p>
           <h2 id="review-title">Calificar usuario</h2>
-          <small class="review-progress" id="review-progress">Paso 1 de 5</small>
         </div>
         <button class="icon-btn" type="button" id="review-close" aria-label="Cerrar evaluacion">
           <i class="fa-solid fa-xmark"></i>
@@ -1166,38 +1155,22 @@
         <strong id="review-target-name">Usuario Agronex</strong>
         <small id="review-target-job">Trabajo finalizado</small>
       </div>
-      <fieldset class="review-choice">
-        <legend id="review-work-again-label">¿Volverias a trabajar con este usuario?</legend>
-        <label>
-          <input type="radio" name="wouldWorkAgain" value="yes" required>
-          <span>Si</span>
-        </label>
-        <label>
-          <input type="radio" name="wouldWorkAgain" value="no" required>
-          <span>No</span>
-        </label>
-      </fieldset>
-      <div class="review-rating-field">
-        <span>Calificacion general</span>
+      <div class="review-rating-field review-overall-field">
+        <span>¿Cómo fue tu experiencia de trabajo?</span>
         <input name="overallRating" type="hidden" required>
-        <div class="star-rating" data-rating-name="overallRating" role="radiogroup" aria-label="Calificacion general"></div>
+        <div id="review-rating-widget"></div>
       </div>
-      <div class="review-category-grid" id="review-category-fields"></div>
-      <section class="review-tags-section">
-        <span>Etiquetas rapidas</span>
-        <div class="review-tags" id="review-tags"></div>
-      </section>
       <label class="full-field">
         <span>Comentario (opcional)</span>
-        <textarea name="comment" rows="4" maxlength="300" placeholder="Resumen breve de la experiencia, sin datos personales."></textarea>
+        <textarea name="comment" rows="3" maxlength="300" placeholder="Contá brevemente cómo fue el trabajo."></textarea>
         <small id="review-comment-counter">0/300</small>
       </label>
       <p class="form-error" id="review-error" hidden></p>
-      <p class="review-note">Solo se puede evaluar una vez y no se puede editar despues de enviar.</p>
+      <p class="review-note">Podés calificar una sola vez por trabajo. Después de enviarla, no se puede editar.</p>
       <div class="form-actions review-submit-bar">
         <button class="btn ghost" type="button" id="review-cancel">Cancelar</button>
         <button class="btn primary" type="submit">
-          <span class="btn-label"><i class="fa-solid fa-star"></i> Enviar evaluacion</span>
+          <span class="btn-label"><i class="fa-solid fa-star"></i> Enviar calificación</span>
         </button>
       </div>
     </form>

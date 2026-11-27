@@ -18,19 +18,19 @@ const steps = [
   {
     number: "01",
     title: "Publicar disponibilidad",
-    text: "El contratista describe su recurso, dónde está y cuándo puede trabajar.",
+    text: "El contratista publica el transporte, la maquinaria o el servicio que ofrece, con su zona y disponibilidad.",
     Icon: Truck,
   },
   {
     number: "02",
-    title: "Encontrar opciones",
-    text: "Productores y cooperativas exploran, filtran y comparan lo que está disponible.",
+    title: "Consultar opciones",
+    text: "Productores y cooperativas revisan las publicaciones y consultan qué opciones hay en la zona.",
     Icon: Compass,
   },
   {
     number: "03",
-    title: "Elegir y contratar",
-    text: "Las partes se conectan para convertir una disponibilidad en una operación concreta.",
+    title: "Coordinar el trabajo",
+    text: "Quien necesita el servicio se contacta con quien lo ofrece para conversar los detalles.",
     Icon: Check,
   },
 ];
@@ -49,7 +49,7 @@ function Footer() {
         </div>
         <div className="footer-links">
           <div><span className="footer-label">Explorar</span><a href="#nexudrive">NexuDrive</a><a href="#ecosistema">Ecosistema</a></div>
-          <div><span className="footer-label">Contacto</span><a href="mailto:agronex.app@gmail.com">agronex.app@gmail.com</a><a href="https://wa.me/543415158464" target="_blank" rel="noreferrer">WhatsApp <ArrowUpRight size={12} /></a><a href="/legal/terminos-agronex.html" target="_blank" rel="noreferrer">Términos de uso <ArrowUpRight size={12} /></a></div>
+          <div><span className="footer-label">Contacto</span><a href="mailto:agronex.app@gmail.com">agronex.app@gmail.com</a><a href="https://wa.me/543415158464" target="_blank" rel="noopener noreferrer">WhatsApp <ArrowUpRight size={12} /></a><a href="/legal/terminos-agronex.html" target="_blank" rel="noopener noreferrer">Términos de uso <ArrowUpRight size={12} /></a><a className="footer-cafecito-button" href="https://cafecito.app/agronex" target="_blank" rel="noopener noreferrer"><img src="/landing/cafecito-button.png" alt="Invitame un café en cafecito.app" loading="lazy" /></a></div>
         </div>
       </div>
       <div className="footer-bottom"><span>© {new Date().getFullYear()} Agronex · Argentina</span><a href="#inicio">Volver al inicio <ArrowUpRight size={13} /></a></div>
@@ -74,13 +74,14 @@ export default function LandingPage() {
           {showParticleField && <Suspense fallback={null}><AgronexParticleField /></Suspense>}
           <div className="hero-inner">
             <div className="hero-copy">
-              <SectionEyebrow light>Una plataforma para el agro argentino</SectionEyebrow>
-`              <h1>Agronex: plataforma AgTech para el agro argentino.<br /><span>Menos incertidumbre, más crecimiento.</span></h1>
-              <p className="hero-description">Conectamos productores, contratistas y cooperativas para coordinar maquinaria, transporte y servicios agropecuarios.</p>
+              <SectionEyebrow light>Agronex · Plataforma agropecuaria</SectionEyebrow>
+              <h1>Conectamos el trabajo del agro.<br /><span>Menos incertidumbre, más crecimiento.</span></h1>
+              <p className="hero-description">Encontrá transporte y maquinaria, consultá disponibilidad y conectate con productores, contratistas y cooperativas en un mismo lugar.</p>
               <div className="hero-actions">
-                <a className="button button-lime" href="/">Explorar Agronex <ArrowUpRight size={17} /></a>
+                <a className="button button-lime" href="/">Explorar NexuDrive <ArrowUpRight size={17} /></a>
                 <a className="button button-quiet" href="#nexudrive">Conocer NexuDrive <ArrowDown size={15} /></a>
               </div>
+              <p className="hero-product-status">NexuDrive está en etapa de prueba. Las publicaciones que vas a ver son de demostración.</p>
             </div>
             <HeroVisual />
           </div>
@@ -93,10 +94,10 @@ export default function LandingPage() {
             <h2 id="context-title">Cuando el agro se mueve,<br /><em>cada hora cuenta.</em></h2>
           </div>
           <div className="context-points">
-            <article className="context-point"><span>01</span><h3>El tiempo se fragmenta</h3><p>Encontrar un camión disponible todavía depende de llamadas, mensajes y contactos dispersos.</p></article>
-            <article className="context-point"><span>02</span><h3>La información también</h3><p>Ubicación, fechas y estados viven en planillas que no siempre están actualizadas.</p></article>
-            <article className="context-point"><span>03</span><h3>La demanda no espera</h3><p>Cuando una cooperativa se satura, necesita sumar capacidad sin perder días coordinando.</p></article>
-            <article className="context-point"><span>04</span><h3>Falta visibilidad</h3><p>Sin un hilo operativo compartido, cada parte toma decisiones con información incompleta.</p></article>
+            <article className="context-point"><span>01</span><h3>Buscar lleva tiempo</h3><p>Encontrar transporte agrícola puede depender de llamadas y contactos dispersos.</p></article>
+            <article className="context-point"><span>02</span><h3>Cuesta saber quién está disponible</h3><p>La información sobre ubicación y fechas no siempre está reunida en un mismo lugar.</p></article>
+            <article className="context-point"><span>03</span><h3>Coordinar suma trabajo</h3><p>Productores, contratistas y cooperativas necesitan ordenar los detalles de cada operación.</p></article>
+            <article className="context-point"><span>04</span><h3>Falta una vista compartida</h3><p>Consultar ofertas y disponibilidad ayuda a evaluar opciones antes de ponerse de acuerdo.</p></article>
           </div>
         </section>
 
@@ -107,9 +108,9 @@ export default function LandingPage() {
               <div>
                 <SectionEyebrow light>El producto actual de Agronex</SectionEyebrow>
                 <h2 id="product-title">NexuDrive</h2>
-                <p className="product-lede">Convertir disponibilidad<br className="desktop-break" /> en una operación concreta.</p>
+                <p className="product-lede">Transporte y maquinaria<br className="desktop-break" /> a la vista para coordinar mejor.</p>
               </div>
-              <p className="product-intro-note">Una forma más clara de encontrar y contratar capacidad para el trabajo agrícola. El transporte es hoy un foco prioritario; la plataforma está pensada para crecer por etapas.</p>
+              <p className="product-intro-note">NexuDrive permite consultar publicaciones y conectar a quienes ofrecen y necesitan transporte, maquinaria o servicios agropecuarios. Está en etapa de prueba y las publicaciones son de demostración.</p>
             </div>
             <div className="product-main-grid">
               <CapacityPreview />
@@ -128,13 +129,13 @@ export default function LandingPage() {
 
         <section className="ecosystem-section" id="ecosistema" aria-labelledby="ecosystem-title">
           <div className="ecosystem-inner section-shell">
-            <div className="ecosystem-intro"><SectionEyebrow>La plataforma evoluciona</SectionEyebrow><h2 id="ecosystem-title">Una plataforma<br />que <em>crece con el agro.</em></h2><p>Hoy NexuDrive se enfoca en resolver necesidades operativas, con el transporte como prioridad. La plataforma puede crecer por etapas y conectar otras capacidades del campo.</p></div>
+            <div className="ecosystem-intro"><SectionEyebrow>La plataforma evoluciona</SectionEyebrow><h2 id="ecosystem-title">Una plataforma<br />que <em>crece con el agro.</em></h2><p>NexuDrive es el módulo actual, enfocado en transporte y operaciones agrícolas. Las demás propuestas son líneas de trabajo en evaluación o proyectos futuros, todavía no disponibles.</p></div>
             <EcosystemList />
           </div>
         </section>
 
         <section className="contact-section" id="contacto" aria-labelledby="contact-title">
-          <div className="contact-inner section-shell"><div><SectionEyebrow>El próximo paso</SectionEyebrow><h2 id="contact-title">Conocé Agronex.<br /><em>Imaginemos lo que sigue.</em></h2></div><div className="contact-action"><p>Explorá NexuDrive y conocé cómo estamos conectando capacidades para el agro.</p><a className="button button-dark inline-flex items-center gap-2" href="/">Explorar Agronex <ArrowUpRight size={16} /></a></div></div>
+          <div className="contact-inner section-shell"><div><SectionEyebrow>El próximo paso</SectionEyebrow><h2 id="contact-title">Conocé Agronex.<br /><em>Imaginemos lo que sigue.</em></h2></div><div className="contact-action"><p>Explorá NexuDrive y conocé la experiencia de publicación y consulta de servicios agropecuarios.</p><a className="button button-dark inline-flex items-center gap-2" href="/">Explorar NexuDrive <ArrowUpRight size={16} /></a></div></div>
         </section>
       </main>
       <Footer />
