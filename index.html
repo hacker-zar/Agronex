@@ -1140,9 +1140,8 @@
     <form class="modal review-modal" id="review-form" novalidate>
       <div class="modal-head">
         <div>
-          <p class="eyebrow">Evaluacion verificada</p>
+          <p class="eyebrow">Evaluación verificada</p>
           <h2 id="review-title">Calificar usuario</h2>
-          <small class="review-progress" id="review-progress">Paso 1 de 5</small>
         </div>
         <button class="icon-btn" type="button" id="review-close" aria-label="Cerrar evaluacion">
           <i class="fa-solid fa-xmark"></i>
@@ -1156,38 +1155,22 @@
         <strong id="review-target-name">Usuario Agronex</strong>
         <small id="review-target-job">Trabajo finalizado</small>
       </div>
-      <fieldset class="review-choice">
-        <legend id="review-work-again-label">¿Volverias a trabajar con este usuario?</legend>
-        <label>
-          <input type="radio" name="wouldWorkAgain" value="yes" required>
-          <span>Si</span>
-        </label>
-        <label>
-          <input type="radio" name="wouldWorkAgain" value="no" required>
-          <span>No</span>
-        </label>
-      </fieldset>
-      <div class="review-rating-field">
-        <span>Calificacion general</span>
+      <div class="review-rating-field review-overall-field">
+        <span>¿Cómo fue tu experiencia de trabajo?</span>
         <input name="overallRating" type="hidden" required>
-        <div class="star-rating" data-rating-name="overallRating" role="radiogroup" aria-label="Calificacion general"></div>
+        <div id="review-rating-widget"></div>
       </div>
-      <div class="review-category-grid" id="review-category-fields"></div>
-      <section class="review-tags-section">
-        <span>Etiquetas rapidas</span>
-        <div class="review-tags" id="review-tags"></div>
-      </section>
       <label class="full-field">
         <span>Comentario (opcional)</span>
-        <textarea name="comment" rows="4" maxlength="300" placeholder="Resumen breve de la experiencia, sin datos personales."></textarea>
+        <textarea name="comment" rows="3" maxlength="300" placeholder="Contá brevemente cómo fue el trabajo."></textarea>
         <small id="review-comment-counter">0/300</small>
       </label>
       <p class="form-error" id="review-error" hidden></p>
-      <p class="review-note">Solo se puede evaluar una vez y no se puede editar despues de enviar.</p>
+      <p class="review-note">Podés calificar una sola vez por trabajo. Después de enviarla, no se puede editar.</p>
       <div class="form-actions review-submit-bar">
         <button class="btn ghost" type="button" id="review-cancel">Cancelar</button>
         <button class="btn primary" type="submit">
-          <span class="btn-label"><i class="fa-solid fa-star"></i> Enviar evaluacion</span>
+          <span class="btn-label"><i class="fa-solid fa-star"></i> Enviar calificación</span>
         </button>
       </div>
     </form>

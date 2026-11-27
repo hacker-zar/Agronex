@@ -45,6 +45,9 @@ const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || (import.me
 let registrationCaptchaToken = "";
 let registrationCaptchaWidgetId = null;
 let turnstileScriptPromise = null;
+let reviewRatingRoot = null;
+let reviewRatingInstance = 0;
+let reviewRatingModulePromise = null;
 
 const seedMachines = [
   {
@@ -195,26 +198,6 @@ const priceUnitsByCategory = {
   Otros: ["hectarea", "tonelada", "viaje", "hora", "dia", "bolsa", "fijo"],
   default: ["hectarea", "tonelada", "viaje", "hora", "dia", "bolsa", "fijo"],
 };
-const reviewCategoriesByRole = {
-  producer: [
-    ["punctuality", "Puntualidad"],
-    ["communication", "Comunicacion"],
-    ["vehicleCondition", "Estado del vehiculo"],
-    ["workCompliance", "Cumplimiento del trabajo"],
-  ],
-  contractor: [
-    ["requestClarity", "Claridad del pedido"],
-    ["loadPunctuality", "Puntualidad para carga y descarga"],
-    ["coordination", "Coordinacion"],
-    ["paymentCompliance", "Cumplimiento del pago"],
-  ],
-};
-
-const reviewTagsByRole = {
-  producer: ["Puntual", "Buena comunicacion", "Trabajo de calidad", "Vehiculo en buenas condiciones", "Muy profesional", "Demoras", "Problemas de coordinacion"],
-  contractor: ["Pedido claro", "Buena coordinacion", "Puntual", "Pago en termino", "Facil de trabajar", "Demoras", "Informacion incompleta"],
-};
-
 const reviewCategoryWeightsByReviewedRole = {
   contractor: { workCompliance: 0.4, punctuality: 0.25, communication: 0.25, vehicleCondition: 0.1 },
   producer: { paymentCompliance: 0.4, coordination: 0.25, loadPunctuality: 0.25, requestClarity: 0.1 },
@@ -4999,22 +4982,66 @@ function bindReviewModal() {
   const form = $("#review-form");
   if (!form) return;
   form.addEventListener("submit", submitReview);
-  form.addEventListener("input", () => {
+  formControl(form, "comment")?.addEventListener("input", () => {
+    updateReviewCommentCounter();
     hideReviewError();
-    updateReviewProgress();
   });
-  form.addEventListener("change", () => {
-    hideReviewError();
-    updateReviewProgress();
-  });
-  form.addEventListener("click", handleReviewFormClick);
-  form.addEventListener("pointerover", handleStarHover);
-  form.addEventListener("pointerout", handleStarHoverOut);
-  formControl(form, "comment")?.addEventListener("input", updateReviewCommentCounter);
   $("#review-close")?.addEventListener("click", closeReviewModal);
   $("#review-cancel")?.addEventListener("click", closeReviewModal);
   $("#review-modal")?.addEventListener("click", (e) => {
     if (e.target.id === "review-modal") closeReviewModal();
+  });
+}
+
+function renderReviewRating(value) {
+  const mount = $("#review-rating-widget");
+  if (!mount) return;
+  const renderVersion = ++reviewRatingInstance;
+  reviewRatingModulePromise ||= Promise.all([
+    import("react"),
+    import("react-dom/client"),
+    import("./components/PeekRating.jsx"),
+  ]).then(([react, reactDom, ratingModule]) => ({
+    createElement: react.createElement,
+    createRoot: reactDom.createRoot,
+    PeekRating: ratingModule.default,
+  }));
+
+  reviewRatingModulePromise.then(({ createElement, createRoot, PeekRating }) => {
+    if (renderVersion !== reviewRatingInstance || !mount.isConnected) return;
+    if (!reviewRatingRoot) reviewRatingRoot = createRoot(mount);
+    reviewRatingRoot.render(createElement(PeekRating, {
+      key: `rating-${renderVersion}`,
+      defaultValue: value,
+      count: 5,
+      labels: ["Mala", "Regular", "Buena", "Muy buena", "Excelente"],
+      activeColor: "#f5b400",
+      idleColor: "#52525b",
+      tipColor: "#27272a",
+      tipTextColor: "#f5f5f5",
+      size: 40,
+      lift: 8,
+      magnify: 1.15,
+      riseDuration: 320,
+      popScale: 1.3,
+      showTip: true,
+      allowClear: true,
+      showLabels: true,
+      readOnly: false,
+      onChange(nextValue) {
+        const input = formControl($("#review-form"), "overallRating");
+        if (input) input.value = nextValue ? String(nextValue) : "";
+        hideReviewError();
+      },
+    }));
+    if (!$("#review-modal").hidden) {
+      window.requestAnimationFrame(() => mount.querySelector(".peek-rating-star")?.focus({ preventScroll: true }));
+    }
+  }).catch(() => {
+    if (renderVersion === reviewRatingInstance) {
+      reviewRatingModulePromise = null;
+      showReviewError("No pudimos cargar la calificación. Cerrá la pantalla e intentá nuevamente.");
+    }
   });
 }
 
@@ -5027,7 +5054,7 @@ function openReviewModal(reservationId, reviewerRole) {
   }
   const role = reviewerRole === "contractor" ? "contractor" : "producer";
   if (reviewForReservation(reservation.id, role)) {
-    showToast("Esta evaluacion ya fue enviada y no se puede editar.");
+    showToast("Esta evaluación ya fue enviada y no se puede editar.");
     return;
   }
   const target = reviewTargetFor(reservation, role);
@@ -5036,42 +5063,22 @@ function openReviewModal(reservationId, reviewerRole) {
   formControl(form, "reservationId").value = reservation.id;
   formControl(form, "reviewerRole").value = role;
   formControl(form, "overallRating").value = "";
+  renderReviewRating(0);
   $("#review-title").textContent = role === "producer" ? "Evaluar contratista" : "Evaluar productor";
-  $("#review-context").textContent = "Esta evaluacion queda asociada a una contratacion finalizada dentro de Agronex.";
+  $("#review-context").textContent = "Esta calificación queda vinculada a un trabajo finalizado.";
   $("#review-target-type").textContent = target.reviewedUserType;
   $("#review-target-name").textContent = target.reviewedName;
   $("#review-target-job").textContent = reservation.machineTitle + " - " + formatDateRange(reservation);
-  $("#review-work-again-label").textContent = "¿Volverías a trabajar con este " + target.reviewedUserType.toLowerCase() + "?";
-  renderStarRating($(".star-rating[data-rating-name='overallRating']"), "overallRating");
-  renderReviewCategoryFields(role);
-  renderReviewTags(role);
   updateReviewCommentCounter();
-  updateReviewProgress();
   hideReviewError();
   $("#review-modal").hidden = false;
-  $("#review-modal .review-choice input")?.focus();
 }
 
 function closeReviewModal() {
+  reviewRatingInstance += 1;
   const modal = $("#review-modal");
   if (modal) modal.hidden = true;
   hideReviewError();
-}
-
-
-
-function renderReviewCategoryFields(reviewerRole) {
-  const target = $("#review-category-fields");
-  if (!target) return;
-  const categories = reviewCategoriesByRole[reviewerRole] || reviewCategoriesByRole.producer;
-  target.innerHTML = categories.map(([key, label]) => [
-    '<div class="review-rating-field review-category-field">',
-    '<span>' + escapeHTML(label) + '</span>',
-    '<input name="review_' + escapeHTML(key) + '" type="hidden" required>',
-    '<div class="star-rating" data-rating-name="review_' + escapeHTML(key) + '" role="radiogroup" aria-label="' + escapeHTML(label) + '"></div>',
-    '</div>',
-  ].join("")).join("");
-  categories.forEach(([key]) => renderStarRating(target.querySelector('.star-rating[data-rating-name="review_' + key + '"]'), "review_" + key));
 }
 
 function submitReview(e) {
@@ -5089,22 +5096,8 @@ function submitReview(e) {
   }
   const overallRating = Number(formControl(form, "overallRating").value);
   if (!validRating(overallRating)) {
-    showReviewError("Selecciona una calificacion general de 1 a 5 estrellas.");
+    showReviewError("Elegí una calificación general de 1 a 5 estrellas.");
     return;
-  }
-  const wouldWorkAgain = clean(form.querySelector('input[name="wouldWorkAgain"]:checked')?.value);
-  if (!wouldWorkAgain) {
-    showReviewError("Indica si volverias a trabajar con este usuario.");
-    return;
-  }
-  const categories = {};
-  for (const [key] of reviewCategoriesByRole[reviewerRole] || []) {
-    const value = Number(formControl(form, "review_" + key)?.value);
-    if (!validRating(value)) {
-      showReviewError("Completa todos los aspectos especificos con 1 a 5 estrellas.");
-      return;
-    }
-    categories[key] = value;
   }
   const target = reviewTargetFor(reservation, reviewerRole);
   const comment = clean(formControl(form, "comment").value).slice(0, 300);
@@ -5119,9 +5112,6 @@ function submitReview(e) {
     reviewedUserType: target.reviewedUserType,
     reviewedRole: target.reviewedRole,
     overallRating,
-    categories,
-    tags: selectedReviewTags(),
-    wouldWorkAgain: wouldWorkAgain === "yes",
     comment,
     createdAt: new Date().toISOString(),
   };
@@ -5132,97 +5122,7 @@ function submitReview(e) {
   renderReservations();
   renderMisOfertas();
   renderCatalog();
-  showToast("Evaluacion enviada. Gracias, suma confianza al perfil.");
-}
-
-function handleReviewFormClick(e) {
-  const star = e.target.closest(".star-btn");
-  if (star && star.closest("#review-form")) {
-    setStarRating(star.dataset.ratingName, Number(star.dataset.ratingValue));
-    return;
-  }
-  const chip = e.target.closest(".review-tag-chip");
-  if (!chip || !chip.closest("#review-form")) return;
-  chip.classList.toggle("selected");
-  chip.setAttribute("aria-pressed", chip.classList.contains("selected") ? "true" : "false");
-  updateReviewProgress();
-}
-
-function handleStarHover(e) {
-  const star = e.target.closest(".star-btn");
-  if (!star || !star.closest("#review-form")) return;
-  updateStarRatingUI(star.dataset.ratingName, Number(star.dataset.ratingValue));
-}
-
-function handleStarHoverOut(e) {
-  const group = e.target.closest(".star-rating");
-  if (!group || !group.closest("#review-form")) return;
-  updateStarRatingUI(group.dataset.ratingName);
-}
-
-
-function renderStarRating(container, name) {
-  if (!container) return;
-  container.dataset.ratingName = name;
-  container.innerHTML = [1, 2, 3, 4, 5].map((value) =>
-    '<button class="star-btn" type="button" data-rating-name="' + escapeHTML(name) + '" data-rating-value="' + value + '" role="radio" aria-checked="false" aria-label="' + value + ' de 5">&#9733;</button>'
-  ).join("");
-  updateStarRatingUI(name);
-}
-
-function setStarRating(name, value) {
-  const form = $("#review-form");
-  const input = formControl(form, name);
-  if (!input || !validRating(value)) return;
-  input.value = String(value);
-  updateStarRatingUI(name);
-  updateReviewProgress();
-  hideReviewError();
-}
-
-
-function updateStarRatingUI(name, previewValue = null) {
-  const form = $("#review-form");
-  if (!form || !name) return;
-  const selected = Number(formControl(form, name)?.value);
-  const preview = validRating(previewValue) ? previewValue : null;
-  $$('.star-rating[data-rating-name="' + name + '"] .star-btn').forEach((button) => {
-    const value = Number(button.dataset.ratingValue);
-    button.classList.toggle("selected", validRating(selected) && value <= selected);
-    button.classList.toggle("preview", preview !== null && value <= preview);
-    button.setAttribute("aria-checked", validRating(selected) && selected === value ? "true" : "false");
-  });
-}
-
-
-function renderReviewTags(reviewerRole) {
-  const target = $("#review-tags");
-  if (!target) return;
-  const tags = reviewTagsByRole[reviewerRole] || [];
-  target.innerHTML = tags.map((tag) =>
-    '<button class="review-tag-chip" type="button" data-tag="' + escapeHTML(tag) + '" aria-pressed="false">' + escapeHTML(tag) + '</button>'
-  ).join("");
-}
-
-function selectedReviewTags() {
-  return $$("#review-tags .review-tag-chip.selected")
-    .map((button) => clean(button.dataset.tag))
-    .filter(Boolean);
-}
-
-function updateReviewProgress() {
-  const progress = $("#review-progress");
-  const form = $("#review-form");
-  if (!progress || !form) return;
-  const reviewerRole = formControl(form, "reviewerRole")?.value === "contractor" ? "contractor" : "producer";
-  const wouldWorkAgain = Boolean(form.querySelector('input[name="wouldWorkAgain"]:checked'));
-  const overallDone = validRating(Number(formControl(form, "overallRating")?.value));
-  const categoryDone = (reviewCategoriesByRole[reviewerRole] || []).every(([key]) => validRating(Number(formControl(form, "review_" + key)?.value)));
-  let step = 1;
-  if (wouldWorkAgain) step = 2;
-  if (wouldWorkAgain && overallDone) step = 3;
-  if (wouldWorkAgain && overallDone && categoryDone) step = 5;
-  progress.textContent = "Paso " + step + " de 5";
+  showToast("Calificación enviada. Gracias por compartir tu experiencia.");
 }
 
 function updateReviewCommentCounter() {
@@ -5500,7 +5400,10 @@ function profileReputationSummary(kind, name) {
   const reviews = reviewsForProfile(kind, name);
   const metrics = automaticReputationMetrics(kind, name);
   const avg = reviews.length ? average(reviews.map((item) => Number(item.overallRating))) : null;
-  const wouldAgain = reviews.length ? Math.round((reviews.filter((item) => item.wouldWorkAgain).length / reviews.length) * 100) : null;
+  const wouldAgainReviews = reviews.filter((item) => typeof item.wouldWorkAgain === "boolean");
+  const wouldAgain = wouldAgainReviews.length
+    ? Math.round((wouldAgainReviews.filter((item) => item.wouldWorkAgain).length / wouldAgainReviews.length) * 100)
+    : null;
   const latest = latestDate([
     ...reviews.map((item) => item.createdAt),
     metrics.latestActivity,
